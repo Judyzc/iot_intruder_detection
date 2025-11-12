@@ -19,6 +19,10 @@
 #include "driver/ledc.h"
 #include "sdkconfig.h"
 #include "camera_index.h"
+#include "hardware_control.h"
+#include "FS.h"
+#include "SPIFFS.h"
+
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -121,6 +125,8 @@ static int8_t is_enrolling = 0;
 #endif
 
 #endif
+
+
 
 typedef struct
 {
@@ -272,6 +278,9 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
         rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
     } else {
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
+        hardware_led_pulse(&intruder_led, 5000);
+
+        Serial.println("INTRUDER");
     }
     return recognize.id;
 }
@@ -1201,6 +1210,7 @@ static esp_err_t index_handler(httpd_req_t *req)
     }
 }
 
+
 void startCameraServer()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -1381,3 +1391,7 @@ void startCameraServer()
         httpd_register_uri_handler(stream_httpd, &stream_uri);
     }
 }
+
+
+
+

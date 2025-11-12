@@ -6,7 +6,7 @@
 **********************************************************************/
 #include "esp_camera.h"
 #include <WiFi.h>
-
+#include "hardware_control.h"
 // ===================
 // Select camera model
 // ===================
@@ -32,6 +32,10 @@
 // ===========================
 const char* ssid     = "DukeVisitor";
 const char* password = "";
+const char* serverName = "https://api.callmebot.com/whatsapp.php";
+unsigned long lastTime = 0;
+unsigned long timerDelay = 5000;
+
 
 void startCameraServer();
 
@@ -60,7 +64,7 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
-  config.frame_size = FRAMESIZE_SVGA;
+  config.frame_size = FRAMESIZE_QVGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -88,7 +92,7 @@ void setup() {
 
   sensor_t * s = esp_camera_sensor_get();
   // initial sensors are flipped vertically and colors are a bit saturated
-  s->set_vflip(s, 1); // flip it back
+  s->set_vflip(s, 0); // flip it back
   s->set_brightness(s, 1); // up the brightness just a bit
   s->set_saturation(s, 0); // lower the saturation
   
@@ -111,9 +115,50 @@ void setup() {
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
+
+  hardware_init();
 }
 
 void loop() {
-  // Do nothing. Everything is done in another task by the web server
-  delay(10000);
+  camera_task_loop();
+  // // Do nothing. Everything is done in another task by the web server
+  // if ((millis() - lastTime) > timerDelay && bool hardware_intruder_is_on() == 1) {
+  //   if(WiFi.status() == WL_CONNECTED){
+  //     WiFiClientSecure client;   
+  //     client.setInsecure();     
+  //     HTTPClient http;
+
+  //     // change phone number in the phone field to change the number the message gets sent to
+  //     // I believe you might need your own api key which you can get by messaging the number +34 611 01 16 37 on whatsapp the message 'I allow callmebot to send me messages' in whatsapp
+  //     String fullURL = String(serverName) + "?phone=%2B19175103025&text=intruder+alert&apikey=2047937";
+
+      
+  //     http.begin(client, fullURL);
+
+      
+  //     int httpResponseCode = http.GET();
+
+  //     Serial.print("HTTP Response code: ");
+  //     Serial.println(httpResponseCode);
+
+  //     if (httpResponseCode > 0) {
+  //       String payload = http.getString();
+  //       Serial.println(payload);
+  //     } else {
+  //       Serial.printf("GET failed: %s\n", http.errorToString(httpResponseCode).c_str());
+  //     }
+
+  //     http.end(); 
+  //   }
+  //   else {
+  //     Serial.println("WiFi Disconnected");
+  //   }
+  //   lastTime = millis();
+  // }
+  delay(10);
+}
+
+void camera_task_loop(){
+    hardware_poll();
+    delay(10);
 }
