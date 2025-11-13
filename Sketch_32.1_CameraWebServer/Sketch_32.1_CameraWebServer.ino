@@ -1,5 +1,5 @@
 /**********************************************************************
-  Filename    : Camera Web Server
+  Filename    : Camera Web Server // git version i think?
   Description : The camera images captured by the ESP32S3 are displayed on the web page.
   Auther      : www.freenove.com
   Modification: 2024/07/01
@@ -10,20 +10,8 @@
 // ===================
 // Select camera model
 // ===================
-//#define CAMERA_MODEL_WROVER_KIT // Has PSRAM
-//#define CAMERA_MODEL_ESP_EYE // Has PSRAM
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_PSRAM // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_V2_PSRAM // M5Camera version B Has PSRAM
-//#define CAMERA_MODEL_M5STACK_WIDE // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_ESP32CAM // No PSRAM
-//#define CAMERA_MODEL_M5STACK_UNITCAM // No PSRAM
-//#define CAMERA_MODEL_AI_THINKER // Has PSRAM
-//#define CAMERA_MODEL_TTGO_T_JOURNAL // No PSRAM
-// ** Espressif Internal Boards **
-//#define CAMERA_MODEL_ESP32_CAM_BOARD
-//#define CAMERA_MODEL_ESP32S2_CAM_BOARD
-//#define CAMERA_MODEL_ESP32S3_CAM_LCD
+
 
 #include "camera_pins.h"
 
@@ -32,7 +20,7 @@
 // ===========================
 const char* ssid     = "DukeVisitor";
 const char* password = "";
-const char* serverName = "https://api.callmebot.com/whatsapp.php";
+// const char* serverName = "https://api.callmebot.com/whatsapp.php";
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
 
@@ -41,9 +29,11 @@ void startCameraServer();
 
 void setup() {
   Serial.begin(115200);
+  delay(100);
   Serial.setDebugOutput(true);
   Serial.println();
 
+  Serial.println("Setting up camera");
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -95,72 +85,49 @@ void setup() {
   s->set_vflip(s, 0); // flip it back
   s->set_brightness(s, 1); // up the brightness just a bit
   s->set_saturation(s, 0); // lower the saturation
-  
-  WiFi.begin(ssid, password);
-  WiFi.setSleep(false);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  // Start Wi-Fi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+
+  unsigned long start = millis();
+  const unsigned long wifiTimeout = 15000; // 15 s timeout
+  while (WiFi.status() != WL_CONNECTED && (millis() - start) < wifiTimeout) {
+    delay(250);
+    Serial.print('.');
   }
-  while (WiFi.STA.hasIP() != true) {
-    Serial.print(".");
-    delay(500);
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi connection failed or timed out!");
+    // you can choose to proceed anyway or restart:
+    // ESP.restart();
+  } else {
+    Serial.println("WiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP().toString()); // explicit string
   }
-  Serial.println("");
-  Serial.println("WiFi connected");
 
   startCameraServer();
 
-  delay(10000);
-  Serial.print("Camera Ready! Use 'http://");
-  Serial.print(WiFi.localIP());
-  Serial.println("' to connect");
+  // give server a moment, then print the camera URL
+  delay(1000);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("Camera Ready! Use 'http://");
+    Serial.print(WiFi.localIP().toString());
+    Serial.println("' to connect");
+  } else {
+    Serial.println("Camera server started but no WiFi IP assigned.");
+  }
 
-  delay(10000);
   hardware_init();
 }
 
 void loop() {
-  camera_task_loop();
-  // // Do nothing. Everything is done in another task by the web server
-  // if ((millis() - lastTime) > timerDelay && bool hardware_intruder_is_on() == 1) {
-  //   if(WiFi.status() == WL_CONNECTED){
-  //     WiFiClientSecure client;   
-  //     client.setInsecure();     
-  //     HTTPClient http;
+  // camera_task_loop();
+  hardware_poll();
 
-  //     // change phone number in the phone field to change the number the message gets sent to
-  //     // I believe you might need your own api key which you can get by messaging the number +34 611 01 16 37 on whatsapp the message 'I allow callmebot to send me messages' in whatsapp
-  //     String fullURL = String(serverName) + "?phone=%2B19175103025&text=intruder+alert&apikey=2047937";
-
-      
-  //     http.begin(client, fullURL);
-
-      
-  //     int httpResponseCode = http.GET();
-
-  //     Serial.print("HTTP Response code: ");
-  //     Serial.println(httpResponseCode);
-
-  //     if (httpResponseCode > 0) {
-  //       String payload = http.getString();
-  //       Serial.println(payload);
-  //     } else {
-  //       Serial.printf("GET failed: %s\n", http.errorToString(httpResponseCode).c_str());
-  //     }
-
-  //     http.end(); 
-  //   }
-  //   else {
-  //     Serial.println("WiFi Disconnected");
-  //   }
-  //   lastTime = millis();
-  // }
   delay(10);
 }
 
-void camera_task_loop(){
-    hardware_poll();
-    delay(10);
-}

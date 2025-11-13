@@ -69,4 +69,9 @@ bool hardware_led_is_on(hw_led_t *led);
  */
 void hardware_poll(void);
 
+void sendIntruderAlertPlainHTTPTest(void);
+void hardware_buzz(void);
+
+void sendIntruderAlert(void);
+
 #endif // HARDWARE_CONTROL_H
