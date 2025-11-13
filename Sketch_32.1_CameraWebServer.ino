@@ -112,10 +112,12 @@ void setup() {
 
   startCameraServer();
 
+  delay(10000);
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
 
+  delay(10000);
   hardware_init();
 }
 
