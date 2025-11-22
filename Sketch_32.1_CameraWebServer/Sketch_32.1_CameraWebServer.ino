@@ -1,25 +1,16 @@
-/**********************************************************************
-  Filename    : Camera Web Server // git version i think?
-  Description : The camera images captured by the ESP32S3 are displayed on the web page.
-  Auther      : www.freenove.com
-  Modification: 2024/07/01
-**********************************************************************/
 #include "esp_camera.h"
 #include <WiFi.h>
 #include "hardware_control.h"
-// ===================
-// Select camera model
-// ===================
+#include "intruder_task.h"
+
+// camera module
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
-
-
 #include "camera_pins.h"
-
-// ===========================
-// Enter your WiFi credentials
-// ===========================
+//WiFi Credentials
 const char* ssid     = "DukeVisitor";
 const char* password = "";
+
+//Text Messages
 // const char* serverName = "https://api.callmebot.com/whatsapp.php";
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
@@ -32,7 +23,6 @@ void setup() {
   delay(100);
   Serial.setDebugOutput(true);
   Serial.println();
-
   Serial.println("Setting up camera");
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -111,7 +101,6 @@ void setup() {
 
   startCameraServer();
 
-  // give server a moment, then print the camera URL
   delay(1000);
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Camera Ready! Use 'http://");
@@ -122,12 +111,11 @@ void setup() {
   }
 
   hardware_init();
+  intruder_task_init(); 
 }
 
 void loop() {
-  // camera_task_loop();
   hardware_poll();
-
   delay(10);
 }
 

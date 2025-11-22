@@ -34,6 +34,16 @@ typedef struct {
 extern hw_led_t intruder_led;   // expose the global intruder LED object
 extern hw_led_t pir_led;        // optional: expose pir_led too
 
+extern volatile bool pir_triggered;           // set by ISR
+extern volatile bool pir_active;              // set by hardware_poll() to enable face detection window
+//extern volatile uint32_t pir_active_until_ms; // expiry time (millis) for pir_active window
+
+extern int64_t pir_active_until_ms; 
+
+#if CONFIG_ESP_FACE_RECOGNITION_ENABLED
+extern int8_t recognition_enabled;
+extern int8_t is_enrolling;
+#endif
 
 // ---------- Initialization ----------
 /**

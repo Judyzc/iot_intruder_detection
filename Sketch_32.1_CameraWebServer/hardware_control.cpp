@@ -9,7 +9,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-
+extern int8_t recognition_enabled;
 
 #ifndef INTRUDER_LED_GPIO
 #define INTRUDER_LED_GPIO GPIO_NUM_21
@@ -26,6 +26,15 @@
 #ifndef BUZZ_GPIO
 #define BUZZ_GPIO GPIO_NUM_45
 #endif
+
+// Detection window default (ms) — tweak as needed
+#ifndef PIR_DETECTION_WINDOW_MS
+#define PIR_DETECTION_WINDOW_MS 30000u // 30 seconds
+#endif
+
+
+
+
 
 typedef struct {
   gpio_num_t pin;
@@ -52,15 +61,21 @@ hw_led_t pir_led = {
 
 
 // pir trigger
-static volatile bool pir_triggered = false;
-volatile bool alert_pending = false;
+// static volatile bool pir_triggered = false;
+// volatile bool alert_pending = false;
+// previously: static volatile bool pir_triggered = false;
+volatile bool pir_triggered = false;
+volatile bool pir_active = false;
+volatile uint32_t pir_active_until_ms = 0;
+
 
 // text message variables
 static volatile unsigned long lastAlertTime = 0;
 #define ALERT_INTERVAL_MS 60000
 
 const char* serverName = "https://api.callmebot.com/whatsapp.php";
-const char* phoneNumber = "%2B19175103025";
+// const char* phoneNumber = "%2B19175103025";
+const char* phoneNumber = "%2B000000000";
 const char* apiKey = "2047937";
 
 
@@ -140,40 +155,42 @@ static bool alertClientInitialized = false;
 
 // text message
 void sendIntruderAlert() {
-  if (millis() - lastAlertTime < ALERT_INTERVAL_MS) return;
+//   if (millis() - lastAlertTime < ALERT_INTERVAL_MS) return;
 
- if (WiFi.status() == WL_CONNECTED) {
-    WiFiClientSecure client;
-    client.setInsecure(); // skip certificate check
-    HTTPClient http;
+//  if (WiFi.status() == WL_CONNECTED) {
+//     WiFiClientSecure client;
+//     client.setInsecure(); // skip certificate check
+//     HTTPClient http;
 
-    String message = "intruder+alert";
-    String fullURL = String(serverName) +
-                     "?phone=" + phoneNumber +
-                     "&text=" + message +
-                     "&apikey=" + apiKey;
-     http.begin(client, fullURL);
+//     String message = "intruder+alert";
+//     String fullURL = String(serverName) +
+//                      "?phone=" + phoneNumber +
+//                      "&text=" + message +
+//                      "&apikey=" + apiKey;
+//      http.begin(client, fullURL);
 
       
-      int httpResponseCode = http.GET();
+//       int httpResponseCode = http.GET();
 
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
+//       Serial.print("HTTP Response code: ");
+//       Serial.println(httpResponseCode);
 
-      if (httpResponseCode > 0) {
-        String payload = http.getString();
-        Serial.println(payload);
-      } else {
-        Serial.printf("GET failed: %s\n", http.errorToString(httpResponseCode).c_str());
-      }
+//       if (httpResponseCode > 0) {
+//         String payload = http.getString();
+//         Serial.println(payload);
+//       } else {
+//         Serial.printf("GET failed: %s\n", http.errorToString(httpResponseCode).c_str());
+//       }
 
-      http.end(); 
-    }
-    else {
-      Serial.println("WiFi Disconnected");
-    }
+//       http.end(); 
+//     }
+//     else {
+//       Serial.println("WiFi Disconnected");
+//     }
 
-  lastAlertTime = millis();
+//   lastAlertTime = millis();
+
+  Serial.println("Sending text message (in theory)");
 }
 
 void hardware_poll(void) {
@@ -181,21 +198,41 @@ void hardware_poll(void) {
     pir_triggered = false;
 
     hardware_led_pulse(&pir_led, 5000);
-
+    uint32_t now = millis();
+    pir_active = true;
+    // pir_active_until_ms = now + PIR_DETECTION_WINDOW_MS;
+    pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS; // PIR_WINDOW_MS e.g. 5000
+    recognition_enabled = 1;
+    Serial.println("Detection active");
+    ESP_LOGI("hw_poll","PIR event processed -> detection active");
     ESP_LOGI("hw_poll", "PIR event processed");
   }
+}
 
-  if (alert_pending) {
-    alert_pending = false;               
-    Serial.println("hw_poll: alert_pending -> sending alert");
-    sendIntruderAlert(); 
+static void buzz_timer_cb(void* arg) {
+  digitalWrite((int)BUZZ_GPIO, LOW);
+}
+static esp_timer_handle_t buzz_timer = NULL;
+
+void hardware_buzz_init() {
+  if (!buzz_timer) {
+    esp_timer_create_args_t timerargs = {
+      .callback = &buzz_timer_cb,
+      .arg = NULL,
+      .name = "buzz_timer"
+    };
+    esp_timer_create(&timerargs, &buzz_timer);
   }
 }
 
 void hardware_buzz(void){
+  // digitalWrite((int)BUZZ_GPIO, HIGH);
+  // delay(1000);
+  // digitalWrite((int)BUZZ_GPIO, LOW);
   digitalWrite((int)BUZZ_GPIO, HIGH);
-  delay(1000);
-  digitalWrite((int)BUZZ_GPIO, LOW);
+  if (buzz_timer) {
+    esp_timer_start_once(buzz_timer, 1000 * 1000); // 1000 ms
+  }
 }
 
 
@@ -218,6 +255,7 @@ void hardware_init(void){
   attachInterrupt(digitalPinToInterrupt((int)PIR_GPIO), pir_isr, RISING);
 
   pinMode((int)BUZZ_GPIO, OUTPUT);
+  hardware_buzz_init();
 
   ESP_LOGI("hw_init", "Hardware initialized: PIR pin %d, intruder LED %d, pir LED %d",
            (int)PIR_GPIO, (int)INTRUDER_LED_GPIO, (int)PIR_LED_GPIO);
