@@ -7,8 +7,10 @@
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
 //WiFi Credentials
-const char* ssid     = "DukeVisitor";
-const char* password = "";
+// const char* ssid     = "DukeVisitor";
+// const char* password = "";
+const char* ssid     = "707-04";
+const char* password = "duKE25!@LK";
 
 //Text Messages
 // const char* serverName = "https://api.callmebot.com/whatsapp.php";
@@ -51,14 +53,13 @@ void setup() {
   config.jpeg_quality = 12;
   config.fb_count = 2;
   
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  // for larger pre-allocated frame buffer.
+  // need PSRAM in order to due facial detection (included in our board)
   if(psramFound()){
     config.jpeg_quality = 10;
     config.fb_count = 2;
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
-    // Limit the frame size when PSRAM is not available
+    // limit frame size when PSRAM is not available
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
@@ -82,7 +83,7 @@ void setup() {
   Serial.print("Connecting to WiFi");
 
   unsigned long start = millis();
-  const unsigned long wifiTimeout = 15000; // 15 s timeout
+  const unsigned long wifiTimeout = 15000; // 15 seconds
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < wifiTimeout) {
     delay(250);
     Serial.print('.');
@@ -91,17 +92,16 @@ void setup() {
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi connection failed or timed out!");
-    // you can choose to proceed anyway or restart:
-    // ESP.restart();
   } else {
     Serial.println("WiFi connected");
     Serial.print("IP address: ");
-    Serial.println(WiFi.localIP().toString()); // explicit string
+    Serial.println(WiFi.localIP().toString()); 
   }
 
   startCameraServer();
 
   delay(1000);
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Camera Ready! Use 'http://");
     Serial.print(WiFi.localIP().toString());
@@ -110,11 +110,13 @@ void setup() {
     Serial.println("Camera server started but no WiFi IP assigned.");
   }
 
+  // init other components
   hardware_init();
   intruder_task_init(); 
 }
 
 void loop() {
+  // PIR polling
   hardware_poll();
   delay(10);
 }

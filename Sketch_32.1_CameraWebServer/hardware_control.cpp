@@ -10,6 +10,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 extern int8_t recognition_enabled;
+extern int8_t detection_enabled;  
 
 #ifndef INTRUDER_LED_GPIO
 #define INTRUDER_LED_GPIO GPIO_NUM_21
@@ -193,19 +194,54 @@ void sendIntruderAlert() {
   Serial.println("Sending text message (in theory)");
 }
 
+// void hardware_poll(void) {
+//   if (pir_triggered) {
+//     pir_triggered = false;
+
+//     hardware_led_pulse(&pir_led, 5000);
+//     uint32_t now = millis();
+//     pir_active = true;
+//     // pir_active_until_ms = now + PIR_DETECTION_WINDOW_MS;
+//     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS; // PIR_WINDOW_MS e.g. 5000
+//     recognition_enabled = 1;
+//     Serial.println("Detection active");
+//     ESP_LOGI("hw_poll","PIR event processed -> detection active");
+//     ESP_LOGI("hw_poll", "PIR event processed");
+//   }
+// }
 void hardware_poll(void) {
+  // handle ISR-triggered activation
   if (pir_triggered) {
     pir_triggered = false;
 
-    hardware_led_pulse(&pir_led, 5000);
-    uint32_t now = millis();
+    hardware_led_pulse(&pir_led, 30000);
+
+    // Use microsecond timer converted to seconds to match your existing code
     pir_active = true;
-    // pir_active_until_ms = now + PIR_DETECTION_WINDOW_MS;
-    pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS; // PIR_WINDOW_MS e.g. 5000
-    recognition_enabled = 1;
-    Serial.println("Detection active");
-    ESP_LOGI("hw_poll","PIR event processed -> detection active");
-    ESP_LOGI("hw_poll", "PIR event processed");
+    pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS;
+
+    // Enable face detection and recognition for the window
+    detection_enabled = 1;            // run face detection
+    delay(50);
+  // #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
+    recognition_enabled = 1;          // run face recognition too (if configured)
+  // #endif
+
+    Serial.println("PIR detection: face detection + recognition enabled");
+  }
+
+  // expiration: turn detection/recognition off after window
+  if (pir_active) {
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms > pir_active_until_ms) {
+      // deactivate
+      pir_active = false;
+      detection_enabled = 0;
+    // #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
+      recognition_enabled = 0;
+    // #endif
+      Serial.println("PIR detection expired: face detection + recognition disabled");
+    }
   }
 }
 
