@@ -7,13 +7,10 @@
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
 //WiFi Credentials
-// const char* ssid     = "DukeVisitor";
-// const char* password = "";
-const char* ssid     = "707-04";
-const char* password = "duKE25!@LK";
+const char* ssid     = "DukeVisitor";
+const char* password = "";
 
 //Text Messages
-// const char* serverName = "https://api.callmebot.com/whatsapp.php";
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
 
