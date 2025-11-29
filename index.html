@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Room Detection Stacked Bar Graph</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: Arial; background: #f4f4f4; padding: 20px; }
+    #myDiv { width: 80%; height: 400px; margin: auto; }
+    button { padding: 10px 20px; margin-top: 20px; display: block; margin-left: auto; margin-right: auto; }
+  </style>
+</head>
+<body>
+
+<h2 style="text-align:center">Room Detection: Intruders vs Registered</h2>
+<div id="myDiv"></div>
+<button id="startBtn">Start Simulation</button>
+
+<script>
+ 
+  let timeStamps = [];         
+  let intrudersCounts = [];    
+  let registeredCounts = [];   
+
+
+  let data = [
+    {
+      x: timeStamps,
+      y: intrudersCounts,
+      name: 'Intruders',
+      type: 'bar',
+      marker: {color: 'red'}
+    },
+    {
+      x: timeStamps,
+      y: registeredCounts,
+      name: 'Registered',
+      type: 'bar',
+      marker: {color: 'green'}
+    }
+  ];
+
+  Plotly.newPlot('myDiv', data, {
+    barmode: 'stack',
+    title: 'Number of People Detected Every 5 minutes',
+    xaxis: { title: 'Time' },
+    yaxis: { title: 'Number of People', range: [0, 10] }
+  });
+
+  async function getCounts() {
+    try {
+        const response = await fetch("http://54.167.124.79:5000/recent");
+        const data = await response.json();
+
+        let intruderCount = 0;
+        let registeredCount = 0;
+
+        data.forEach(entry => {
+        if (entry.intruder_status === true) {
+            intruderCount++;
+            
+        } else if (entry.intruder_status === false) {
+            registeredCount++;
+        }
+        });
+
+        
+        return {
+        intruderCount,
+        registeredCount,
+        };
+
+    } catch (error) {
+        console.error("Error fetching or counting:", error);
+
+        
+        return {
+        intruderCount: 0,
+        registeredCount: 0,
+        };
+    }
+    }
+
+  async function simulateDetection() {
+
+    let now = new Date();
+    let timeStr = now.toLocaleTimeString(); 
+
+    const { intruderCount, registeredCount } = await getCounts();
+
+    console.log("intruder count");
+    console.log(intruderCount);
+
+    console.log("registered");
+    console.log(registeredCount);
+
+    timeStamps.push(timeStr);
+    intrudersCounts.push(intruderCount);
+    registeredCounts.push(registeredCount);
+
+    Plotly.update('myDiv', {
+      y: [intrudersCounts, registeredCounts],
+      x: [timeStamps, timeStamps]
+    });
+
+  
+    if(timeStamps.length > 10) {
+      timeStamps.shift();
+      intrudersCounts.shift();
+      registeredCounts.shift();
+      Plotly.update('myDiv', {
+        y: [intrudersCounts, registeredCounts],
+        x: [timeStamps, timeStamps]
+      });
+    }
+  }
+
+  let interval = null;
+  document.getElementById("startBtn").addEventListener("click", function() {
+    if(interval !== null) return; 
+    simulateDetection();
+    interval = setInterval(simulateDetection, 300000);
+  });
+
+</script>
+
+</body>
+</html>
