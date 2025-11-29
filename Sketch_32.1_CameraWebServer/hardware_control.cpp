@@ -33,10 +33,6 @@ extern int8_t detection_enabled;
 #define PIR_DETECTION_WINDOW_MS 30000u // 30 seconds
 #endif
 
-
-
-
-
 typedef struct {
   gpio_num_t pin;
   esp_timer_handle_t timer;
@@ -62,13 +58,10 @@ hw_led_t pir_led = {
 
 
 // pir trigger
-// static volatile bool pir_triggered = false;
-// volatile bool alert_pending = false;
-// previously: static volatile bool pir_triggered = false;
 volatile bool pir_triggered = false;
 volatile bool pir_active = false;
 volatile uint32_t pir_active_until_ms = 0;
-
+volatile bool alert_pending = false;
 
 // text message variables
 static volatile unsigned long lastAlertTime = 0;
@@ -77,12 +70,17 @@ static volatile unsigned long lastAlertTime = 0;
 const char* serverName = "https://api.callmebot.com/whatsapp.php";
 // const char* phoneNumber = "%2B19175103025";
 // const char* phoneNumber = "%2B000000000";
+
+// judy
 const char* phoneNumber = "%2B19199282464";
-const char* apiKey = "2047937";
+const char* apiKey = "5923783";
+
+// const char* phoneNumber = "%2B19175103025";
+// const char* apiKey = "2047937";
 
 
 // led timer
-static void led_timer_callback(void* arg){
+static void led_timer_callback(void* arg) {
   if (arg == NULL) return;
   hw_led_t *led = (hw_led_t*)arg;
   digitalWrite((int)led->pin, LOW);
@@ -110,7 +108,7 @@ esp_err_t hardware_led_init(hw_led_t *led) {
 
 
 // pulse led
-void hardware_led_pulse(hw_led_t *led, uint32_t ms){
+void hardware_led_pulse(hw_led_t *led, uint32_t ms) {
   if (!led) return;
 
   digitalWrite((int)led->pin, HIGH);
@@ -126,8 +124,7 @@ void hardware_led_pulse(hw_led_t *led, uint32_t ms){
 
 
 // turn led off
-void hardware_led_off(hw_led_t *led)
-{
+void hardware_led_off(hw_led_t *led) {
   if (!led) return;
 
   if (led->timer) {
@@ -139,17 +136,15 @@ void hardware_led_off(hw_led_t *led)
 
 
 // led state
-bool hardware_led_is_on(hw_led_t *led)
-{
+bool hardware_led_is_on(hw_led_t *led) {
   if (!led) return false;
   return led->state;
 }
+
 // PIR
 void IRAM_ATTR pir_isr() {
   pir_triggered = true;
 }
-
-
 
 static WiFiClientSecure alertClient;
 static HTTPClient alertHttp;
@@ -159,39 +154,32 @@ static bool alertClientInitialized = false;
 void sendIntruderAlert() {
   if (millis() - lastAlertTime < ALERT_INTERVAL_MS) return;
 
- if (WiFi.status() == WL_CONNECTED) {
+  if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure client;
     client.setInsecure(); // skip certificate check
     HTTPClient http;
-
     String message = "intruder+alert";
     String fullURL = String(serverName) +
-                     "?phone=" + phoneNumber +
-                     "&text=" + message +
-                     "&apikey=" + apiKey;
-     http.begin(client, fullURL);
+                      "?phone=" + phoneNumber +
+                      "&text=" + message +
+                      "&apikey=" + apiKey;
+      http.begin(client, fullURL);
+    int httpResponseCode = http.GET();
 
-      
-      int httpResponseCode = http.GET();
-
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
-
-      if (httpResponseCode > 0) {
-        String payload = http.getString();
-        Serial.println(payload);
-      } else {
-        Serial.printf("GET failed: %s\n", http.errorToString(httpResponseCode).c_str());
-      }
-
-      http.end(); 
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    if (httpResponseCode > 0) {
+      String payload = http.getString();
+      Serial.println(payload);
+    } else {
+      Serial.printf("GET failed: %s\n", http.errorToString(httpResponseCode).c_str());
+    }
+    http.end(); 
     }
     else {
       Serial.println("WiFi Disconnected");
     }
-
   lastAlertTime = millis();
-
   Serial.println("Sending text message (in theory)");
 }
 
@@ -214,23 +202,16 @@ void hardware_poll(void) {
   // handle ISR-triggered activation
   if (pir_triggered) {
     pir_triggered = false;
-
     hardware_led_pulse(&pir_led, 30000);
-
     // Use microsecond timer converted to seconds to match your existing code
     pir_active = true;
     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS;
-
     // Enable face detection and recognition for the window
     detection_enabled = 1;            // run face detection
     delay(50);
-  // #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
     recognition_enabled = 1;          // run face recognition too (if configured)
-  // #endif
-
     // Serial.println("PIR detection: face detection + recognition enabled");
   }
-
   // expiration: turn detection/recognition off after window
   if (pir_active) {
     int64_t now_ms = esp_timer_get_time() / 1000;
@@ -238,9 +219,7 @@ void hardware_poll(void) {
       // deactivate
       pir_active = false;
       detection_enabled = 0;
-    // #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
       recognition_enabled = 0;
-    // #endif
       Serial.println("PIR detection expired: face detection + recognition disabled");
     }
   }
@@ -249,6 +228,7 @@ void hardware_poll(void) {
 static void buzz_timer_cb(void* arg) {
   digitalWrite((int)BUZZ_GPIO, LOW);
 }
+
 static esp_timer_handle_t buzz_timer = NULL;
 
 void hardware_buzz_init() {
@@ -262,38 +242,52 @@ void hardware_buzz_init() {
   }
 }
 
-void hardware_buzz(void){
-  // digitalWrite((int)BUZZ_GPIO, HIGH);
-  // delay(1000);
-  // digitalWrite((int)BUZZ_GPIO, LOW);
+// void hardware_poll(void) {
+//   if (pir_triggered) {
+//     pir_triggered = false;
+//     hardware_led_pulse(&pir_led, 5000);
+//     ESP_LOGI("hw_poll", "PIR event processed");
+//   }
+//   if (alert_pending) {
+//     alert_pending = false;               
+//     Serial.println("hw_poll: alert_pending -> sending alert");
+//     sendIntruderAlert(); 
+//   }
+// }
+
+void hardware_buzz(void) {
   digitalWrite((int)BUZZ_GPIO, HIGH);
   if (buzz_timer) {
     esp_timer_start_once(buzz_timer, 1000 * 1000); // 1000 ms
   }
 }
 
+void send_to_database(bool intruder_status, int face_id, int confidence) {
+  WiFiClient client;    
+  HTTPClient http;
+  const char* serverURL = "http://54.167.124.79:5000/create";
+  http.begin(client, serverURL);
+  http.addHeader("Content-Type", "application/json");
+  String jsonBody = String("{") + String("\"intruder_status\":") + String(intruder_status ? "true" : "false") + String(",") + String("\"face_id\":") + String(face_id) + String(",") + String("\"confidence\":") + String(confidence) + String("}");
+  int httpCode = http.POST(jsonBody);
+}
 
 // hardware init
-void hardware_init(void){
+void hardware_init(void) {
   esp_err_t err;
-
   err = hardware_led_init(&intruder_led);
   if (err != ESP_OK) {
     ESP_LOGE("hw_init", "Failed to create timer for intruder_led (err=%d)", err);
   }
-
   err = hardware_led_init(&pir_led);
   if (err != ESP_OK) {
     ESP_LOGE("hw_init", "Failed to create timer for pir_led (err=%d)", err);
   }
-
   // PIR Sensor
   pinMode((int)PIR_GPIO, INPUT);
   attachInterrupt(digitalPinToInterrupt((int)PIR_GPIO), pir_isr, RISING);
-
   pinMode((int)BUZZ_GPIO, OUTPUT);
   hardware_buzz_init();
-
   ESP_LOGI("hw_init", "Hardware initialized: PIR pin %d, intruder LED %d, pir LED %d",
            (int)PIR_GPIO, (int)INTRUDER_LED_GPIO, (int)PIR_LED_GPIO);
 }
