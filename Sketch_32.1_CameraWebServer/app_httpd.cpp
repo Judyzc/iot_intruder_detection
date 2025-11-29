@@ -261,11 +261,6 @@ static void draw_face_boxes(fb_data_t *fb, std::list<dl::detect::result_t> *resu
     }
 }
 
-struct face_recog_result {
-    int id;
-    float similarity;
-};
-
 #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
 static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *results)
 {
@@ -287,13 +282,13 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
     face_info_t recognize = recognizer.recognize(tensor, landmarks);
     if(recognize.id >= 0){
         rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
-        send_to_database(true, recognize.id, recognize.similarity);
+        send_to_database(false, recognize.id, recognize.similarity);
     } else {
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
         hardware_led_pulse(&intruder_led, 5000);
         hardware_buzz();
         Serial.println("INTRUDER");
-        send_to_database(false, -1, 200.0);
+        send_to_database(true, -1, 200.0);
         
         alert_pending = true;
         // sendIntruderAlert();
