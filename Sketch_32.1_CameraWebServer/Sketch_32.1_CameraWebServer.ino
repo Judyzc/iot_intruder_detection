@@ -6,16 +6,18 @@
 // camera module
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
-//WiFi Credentials
-const char* ssid     = "DukeVisitor";
-const char* password = "";
 
-//Text Messages
+//WiFi Credentials
+// const char* ssid     = "DukeVisitor";
+// const char* password = "";
+
+// PIR variables
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
 
-
+// forward init camera web server function
 void startCameraServer();
+
 
 void setup() {
   Serial.begin(115200);
@@ -50,13 +52,14 @@ void setup() {
   config.jpeg_quality = 12;
   config.fb_count = 2;
   
-  // need PSRAM in order to due facial detection (included in our board)
+  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
+  // for larger pre-allocated frame buffer.
   if(psramFound()){
     config.jpeg_quality = 10;
     config.fb_count = 2;
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
-    // limit frame size when PSRAM is not available
+    // Limit the frame size when PSRAM is not available
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
@@ -80,7 +83,7 @@ void setup() {
   Serial.print("Connecting to WiFi");
 
   unsigned long start = millis();
-  const unsigned long wifiTimeout = 15000; // 15 seconds
+  const unsigned long wifiTimeout = 15000; // 15 s timeout
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < wifiTimeout) {
     delay(250);
     Serial.print('.');
@@ -97,8 +100,8 @@ void setup() {
 
   startCameraServer();
 
+  // give server a moment, then print the camera URL
   delay(1000);
-
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Camera Ready! Use 'http://");
     Serial.print(WiFi.localIP().toString());
@@ -107,7 +110,7 @@ void setup() {
     Serial.println("Camera server started but no WiFi IP assigned.");
   }
 
-  // init other components
+  // start (initialize) other components
   hardware_init();
   intruder_task_init(); 
 }
@@ -115,6 +118,4 @@ void setup() {
 void loop() {
   // PIR polling
   hardware_poll();
-  delay(10);
 }
-

@@ -17,22 +17,20 @@
 #include "esp_camera.h"
 #include "img_converters.h"
 #include "fb_gfx.h"
+#include "driver/ledc.h"
 #include "sdkconfig.h"
 #include "camera_index.h"
-#include "esp32-hal-log.h"
 #include "hardware_control.h"
+#include "FS.h"
+#include "SPIFFS.h"
+#include <WiFi.h>
+#include <WiFiClient.h> 
+#include <HTTPClient.h>
 #define TAG "app: "
 
 /* always want face detection and face recognition, removed these */ 
 // #define CONFIG_ESP_FACE_DETECT_ENABLED 1
 // #define CONFIG_ESP_FACE_RECOGNITION_ENABLED 1
-/* for logging */
-// ARDUHAL_LOG_LEVEL_NONE (0)
-// ARDUHAL_LOG_LEVEL_ERROR (1)
-// ARDUHAL_LOG_LEVEL_WARN (2)
-// ARDUHAL_LOG_LEVEL_INFO (3)
-// ARDUHAL_LOG_LEVEL_DEBUG (4)
-
 
 /* all part of face detection and recogition */
 #include <vector>
@@ -46,8 +44,7 @@
 #include "face_recognition_tool.hpp"
 #include "face_recognition_112_v1_s16.hpp"
 #include "face_recognition_112_v1_s8.hpp"
-/* we need QUANT_TYPE === 0. if set to 1 => very large firmware, very slow, reboots when streaming... */
-#define QUANT_TYPE 0 
+
 #define FACE_ID_SAVE_NUMBER 7
 #define FACE_COLOR_WHITE 0x00FFFFFF
 #define FACE_COLOR_BLACK 0x00000000
@@ -80,13 +77,11 @@ int8_t detection_enabled = 0;
 int8_t recognition_enabled = 0;
 int8_t is_enrolling = 0;
 
-#if QUANT_TYPE
-    // S16 model
-    FaceRecognition112V1S16 recognizer;
-#else
-    // S8 model. USED
-    FaceRecognition112V1S8 recognizer;
-#endif
+/* database ? */
+extern volatile bool alert_pending;
+
+/* face recognition model */
+FaceRecognition112V1S8 recognizer;
 
 
 
@@ -190,21 +185,26 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
     face_info_t recognize = recognizer.recognize(tensor, landmarks);
     if(recognize.id >= 0){
         rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
+        send_to_database(false, recognize.id, recognize.similarity);
     } else {
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
         hardware_led_pulse(&intruder_led, 5000);
+        hardware_buzz();
+        Serial.println("INTRUDER");
+        send_to_database(true, -1, 200.0);
+        
+        alert_pending = true;
+        // sendIntruderAlert();
+        // sendIntruderAlertPlainHTTPTest();
     }
     return recognize.id;
 }
 
 
-static esp_err_t bmp_handler(httpd_req_t *req)
-{
+static esp_err_t bmp_handler(httpd_req_t *req) {
     camera_fb_t *fb = NULL;
     esp_err_t res = ESP_OK;
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     uint64_t fr_start = esp_timer_get_time();
-#endif
     fb = esp_camera_fb_get();
     if (!fb)
     {
@@ -221,7 +221,6 @@ static esp_err_t bmp_handler(httpd_req_t *req)
     snprintf(ts, 32, "%ld.%06ld", fb->timestamp.tv_sec, fb->timestamp.tv_usec);
     httpd_resp_set_hdr(req, "X-Timestamp", (const char *)ts);
 
-
     uint8_t * buf = NULL;
     size_t buf_len = 0;
     bool converted = frame2bmp(fb, &buf, &buf_len);
@@ -233,12 +232,11 @@ static esp_err_t bmp_handler(httpd_req_t *req)
     }
     res = httpd_resp_send(req, (const char *)buf, buf_len);
     free(buf);
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     uint64_t fr_end = esp_timer_get_time();
-#endif
     ESP_LOGI(TAG, "BMP: %llums, %uB", (uint64_t)((fr_end - fr_start) / 1000), buf_len);
     return res;
 }
+
 
 static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_t len)
 {
@@ -259,11 +257,8 @@ static esp_err_t capture_handler(httpd_req_t *req)
 {
     camera_fb_t *fb = NULL;
     esp_err_t res = ESP_OK;
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     int64_t fr_start = esp_timer_get_time();
-#endif
-
-fb = esp_camera_fb_get();
+    fb = esp_camera_fb_get();
     if (!fb)
     {
         ESP_LOGE(TAG, "Camera capture failed");
@@ -282,20 +277,14 @@ fb = esp_camera_fb_get();
     size_t out_len, out_width, out_height;
     uint8_t *out_buf;
     bool s;
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     bool detected = false;
-#endif
     int face_id = 0;
     if (!detection_enabled || fb->width > 400)
     {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
         size_t fb_len = 0;
-#endif
         if (fb->format == PIXFORMAT_JPEG)
         {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             fb_len = fb->len;
-#endif
             res = httpd_resp_send(req, (const char *)fb->buf, fb->len);
         }
         else
@@ -303,14 +292,10 @@ fb = esp_camera_fb_get();
             jpg_chunking_t jchunk = {req, 0};
             res = frame2jpg_cb(fb, 80, jpg_encode_stream, &jchunk) ? ESP_OK : ESP_FAIL;
             httpd_resp_send_chunk(req, NULL, 0);
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             fb_len = jchunk.len;
-#endif
         }
         esp_camera_fb_return(fb);
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
         int64_t fr_end = esp_timer_get_time();
-#endif
         ESP_LOGI(TAG, "JPG: %uB %ums", (uint32_t)(fb_len), (uint32_t)((fr_end - fr_start) / 1000));
         return res;
     }
@@ -334,9 +319,7 @@ fb = esp_camera_fb_get();
             rfb.data = fb->buf;
             rfb.bytes_per_pixel = 2;
             rfb.format = FB_RGB565;
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             detected = true;
-#endif
             draw_face_boxes(&rfb, &results, face_id);
         }
         s = fmt2jpg_cb(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 90, jpg_encode_stream, &jchunk);
@@ -379,9 +362,7 @@ fb = esp_camera_fb_get();
 #endif
 
         if (results.size() > 0) {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             detected = true;
-#endif
             if (recognition_enabled) {
                 face_id = run_face_recognition(&rfb, &results);
             }
@@ -397,9 +378,7 @@ fb = esp_camera_fb_get();
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     int64_t fr_end = esp_timer_get_time();
-#endif
     ESP_LOGI(TAG, "FACE: %uB %ums %s%d", (uint32_t)(jchunk.len), (uint32_t)((fr_end - fr_start) / 1000), detected ? "DETECTED " : "", face_id);
     return res;
 }
@@ -412,14 +391,12 @@ static esp_err_t stream_handler(httpd_req_t *req)
     size_t _jpg_buf_len = 0;
     uint8_t *_jpg_buf = NULL;
     char *part_buf[128];   // chat: change to char, instead of char*
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
         bool detected = false;
         int64_t fr_ready = 0;
         int64_t fr_recognize = 0;
         int64_t fr_encode = 0;
         int64_t fr_face = 0;
         int64_t fr_start = 0;
-#endif
     int face_id = 0;
     size_t out_len = 0, out_width = 0, out_height = 0;
     uint8_t *out_buf = NULL;
@@ -430,28 +407,21 @@ static esp_err_t stream_handler(httpd_req_t *req)
 #else
     HumanFaceDetectMSR01 s1(0.3F, 0.5F, 10, 0.2F);
 #endif
-
     static int64_t last_frame = 0;
     if (!last_frame)
     {
         last_frame = esp_timer_get_time();
     }
-
     res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
     if (res != ESP_OK)
     {
         return res;
     }
-
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "X-Framerate", "60");
-
-
     while (true)
     {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
         detected = false;
-#endif
         face_id = 0;
         fb = esp_camera_fb_get();
         if (!fb)
@@ -463,13 +433,11 @@ static esp_err_t stream_handler(httpd_req_t *req)
         {
             _timestamp.tv_sec = fb->timestamp.tv_sec;
             _timestamp.tv_usec = fb->timestamp.tv_usec;
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             fr_start = esp_timer_get_time();
             fr_ready = fr_start;
             fr_encode = fr_start;
             fr_recognize = fr_start;
             fr_face = fr_start;
-#endif
             if (!detection_enabled || fb->width > 400)
             {
                 if (fb->format != PIXFORMAT_JPEG)
@@ -492,19 +460,15 @@ static esp_err_t stream_handler(httpd_req_t *req)
             else
             {
                 if (fb->format == PIXFORMAT_RGB565 && !recognition_enabled) {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                     fr_ready = esp_timer_get_time();
-#endif
 #if TWO_STAGE
                     std::list<dl::detect::result_t> &candidates = s1.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3});
                     std::list<dl::detect::result_t> &results = s2.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3}, candidates);
 #else
                     std::list<dl::detect::result_t> &results = s1.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3});
 #endif
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                     fr_face = esp_timer_get_time();
                     fr_recognize = fr_face;
-#endif
                     if (results.size() > 0) {
                         fb_data_t rfb;
                         rfb.width = fb->width;
@@ -512,9 +476,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                         rfb.data = fb->buf;
                         rfb.bytes_per_pixel = 2;
                         rfb.format = FB_RGB565;
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                         detected = true;
-#endif
                         draw_face_boxes(&rfb, &results, face_id);
                     }
                     s = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 80, &_jpg_buf, &_jpg_buf_len);
@@ -524,9 +486,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                         ESP_LOGE(TAG, "fmt2jpg failed");
                         res = ESP_FAIL;
                     }
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                     fr_encode = esp_timer_get_time();
-#endif
                 } else
                 {
                     out_len = fb->width * fb->height * 3;
@@ -545,38 +505,26 @@ static esp_err_t stream_handler(httpd_req_t *req)
                             ESP_LOGE(TAG, "to rgb888 failed");
                             res = ESP_FAIL;
                         } else {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                             fr_ready = esp_timer_get_time();
-#endif
-
                             fb_data_t rfb;
                             rfb.width = out_width;
                             rfb.height = out_height;
                             rfb.data = out_buf;
                             rfb.bytes_per_pixel = 3;
                             rfb.format = FB_BGR888;
-
 #if TWO_STAGE
                             std::list<dl::detect::result_t> &candidates = s1.infer((uint8_t *)out_buf, {(int)out_height, (int)out_width, 3});
                             std::list<dl::detect::result_t> &results = s2.infer((uint8_t *)out_buf, {(int)out_height, (int)out_width, 3}, candidates);
 #else
                             std::list<dl::detect::result_t> &results = s1.infer((uint8_t *)out_buf, {(int)out_height, (int)out_width, 3});
 #endif
-
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                             fr_face = esp_timer_get_time();
                             fr_recognize = fr_face;
-#endif
-
                             if (results.size() > 0) {
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                                 detected = true;
-#endif
                                 if (recognition_enabled) {
                                     face_id = run_face_recognition(&rfb, &results);
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                                     fr_recognize = esp_timer_get_time();
-#endif
                                 }
                                 draw_face_boxes(&rfb, &results, face_id);
                             }
@@ -586,9 +534,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                                 ESP_LOGE(TAG, "fmt2jpg failed");
                                 res = ESP_FAIL;
                             }
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
                             fr_encode = esp_timer_get_time();
-#endif
                         }
                     }
                 }
@@ -624,15 +570,11 @@ static esp_err_t stream_handler(httpd_req_t *req)
             break;
         }
         int64_t fr_end = esp_timer_get_time();
-
-#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
         int64_t ready_time = (fr_ready - fr_start) / 1000;
         int64_t face_time = (fr_face - fr_ready) / 1000;
         int64_t recognize_time = (fr_recognize - fr_face) / 1000;
         int64_t encode_time = (fr_encode - fr_recognize) / 1000;
         int64_t process_time = (fr_encode - fr_start) / 1000;
-#endif
-
         int64_t frame_time = fr_end - last_frame;
         frame_time /= 1000;
         ESP_LOGI(TAG, "MJPG: %uB %ums (%.1ffps)"
@@ -931,6 +873,5 @@ void startCameraServer()
         httpd_register_uri_handler(stream_httpd, &stream_uri);
     }
 }
-
 
 

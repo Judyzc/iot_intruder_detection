@@ -82,6 +82,8 @@ void hardware_poll(void);
 void sendIntruderAlertPlainHTTPTest(void);
 void hardware_buzz(void);
 
+void send_to_database(bool intruder_status, int face_id, int confidence);
+
 void sendIntruderAlert(void);
 
 #endif // HARDWARE_CONTROL_H
