@@ -61,7 +61,7 @@ hw_led_t pir_led = {
 volatile bool pir_triggered = false;
 volatile bool pir_active = false;
 volatile uint32_t pir_active_until_ms = 0;
-volatile bool alert_pending = false;
+// volatile bool alert_pending = false;
 
 // text message variables
 static volatile unsigned long lastAlertTime = 0;
@@ -234,7 +234,7 @@ void hardware_buzz(void) {
   }
 }
 
-void send_to_database(bool intruder_status, int face_id, int confidence) {
+void send_to_database(bool intruder_status, int face_id, float confidence) {
   WiFiClient client;    
   HTTPClient http;
   const char* serverURL = "http://54.167.124.79:5000/create";

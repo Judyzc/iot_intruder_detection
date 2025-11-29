@@ -11,6 +11,7 @@
 // const char* ssid     = "DukeVisitor";
 // const char* password = "";
 
+
 // PIR variables
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
@@ -52,8 +53,8 @@ void setup() {
   config.jpeg_quality = 12;
   config.fb_count = 2;
   
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  // for larger pre-allocated frame buffer.
+  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality for larger pre-allocated frame buffer.
+  // our esp uses PSRAM for face recognition
   if(psramFound()){
     config.jpeg_quality = 10;
     config.fb_count = 2;
@@ -100,7 +101,7 @@ void setup() {
 
   startCameraServer();
 
-  // give server a moment, then print the camera URL
+  // give server a moment to start up and then print the camera URL
   delay(1000);
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Camera Ready! Use 'http://");
