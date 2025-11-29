@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 
@@ -38,7 +38,7 @@ def create():
             continue  
 
         cur.execute(
-            "INSERT INTO intruder_list (intruder_status, face_id, confidence) VALUES (%s, %s, %s)",
+            "INSERT INTO intruder_data (intruder_status, face_id, confidence) VALUES (%s, %s, %s)",
             (intruder_status, face_id, confidence)
         )
 
@@ -48,6 +48,37 @@ def create():
 
     return jsonify({"message": f"row inserted successfully"}), 201
 
+@app.route('/recent', methods=['GET'])
+def get_recent():
+    """
+    Get all rows inserted in the last 5 minutes - we only want the most recent data 
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    cur.execute(
+        "SELECT intruder_status, face_id, confidence, timestamp FROM intruder_data WHERE timestamp >= %s ORDER BY timestamp ASC",
+        (five_min_ago,)
+    )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # formatting the JSON GET request
+
+    data = [
+        {
+            "intruder_status": r[0],
+            "face_id": r[1],
+            "confidence": r[2],
+            "timestamp": r[3].isoformat()
+        } for r in rows
+    ]
+
+    return jsonify(data), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
