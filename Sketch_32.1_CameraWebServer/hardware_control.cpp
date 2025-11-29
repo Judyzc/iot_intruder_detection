@@ -152,7 +152,7 @@ static bool alertClientInitialized = false;
 
 // text message
 void sendIntruderAlert() {
-  if (millis() - lastAlertTime < ALERT_INTERVAL_MS) return;
+  if (lastAlertTime != 0 && (millis() - lastAlertTime) < ALERT_INTERVAL_MS) return;
 
   if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure client;
@@ -180,39 +180,24 @@ void sendIntruderAlert() {
       Serial.println("WiFi Disconnected");
     }
   lastAlertTime = millis();
-  Serial.println("Sending text message (in theory)");
+  // Serial.println("Sending text message (in theory)");
 }
 
-// void hardware_poll(void) {
-//   if (pir_triggered) {
-//     pir_triggered = false;
-
-//     hardware_led_pulse(&pir_led, 5000);
-//     uint32_t now = millis();
-//     pir_active = true;
-//     // pir_active_until_ms = now + PIR_DETECTION_WINDOW_MS;
-//     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS; // PIR_WINDOW_MS e.g. 5000
-//     recognition_enabled = 1;
-//     Serial.println("Detection active");
-//     ESP_LOGI("hw_poll","PIR event processed -> detection active");
-//     ESP_LOGI("hw_poll", "PIR event processed");
-//   }
-// }
 void hardware_poll(void) {
   // handle ISR-triggered activation
   if (pir_triggered) {
     pir_triggered = false;
     hardware_led_pulse(&pir_led, 30000);
-    // Use microsecond timer converted to seconds to match your existing code
+
     pir_active = true;
     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS;
     // Enable face detection and recognition for the window
     detection_enabled = 1;            // run face detection
-    delay(50);
+    delay(500);
     recognition_enabled = 1;          // run face recognition too (if configured)
-    // Serial.println("PIR detection: face detection + recognition enabled");
+    Serial.println("PIR detection: face detection + recognition enabled");
   }
-  // expiration: turn detection/recognition off after window
+ 
   if (pir_active) {
     int64_t now_ms = esp_timer_get_time() / 1000;
     if (now_ms > pir_active_until_ms) {
@@ -241,19 +226,6 @@ void hardware_buzz_init() {
     esp_timer_create(&timerargs, &buzz_timer);
   }
 }
-
-// void hardware_poll(void) {
-//   if (pir_triggered) {
-//     pir_triggered = false;
-//     hardware_led_pulse(&pir_led, 5000);
-//     ESP_LOGI("hw_poll", "PIR event processed");
-//   }
-//   if (alert_pending) {
-//     alert_pending = false;               
-//     Serial.println("hw_poll: alert_pending -> sending alert");
-//     sendIntruderAlert(); 
-//   }
-// }
 
 void hardware_buzz(void) {
   digitalWrite((int)BUZZ_GPIO, HIGH);

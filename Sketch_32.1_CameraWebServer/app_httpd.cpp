@@ -21,6 +21,7 @@
 #include "sdkconfig.h"
 #include "camera_index.h"
 #include "hardware_control.h"
+#include "intruder_task.h"
 #include "FS.h"
 #include "SPIFFS.h"
 #include <WiFi.h>
@@ -188,8 +189,9 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
         send_to_database(false, recognize.id, recognize.similarity);
     } else {
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
-        hardware_led_pulse(&intruder_led, 5000);
-        hardware_buzz();
+        // hardware_led_pulse(&intruder_led, 5000);
+        // hardware_buzz();
+        intruder_queue_send(1);
         Serial.println("INTRUDER");
         send_to_database(true, -1, 200.0);
         

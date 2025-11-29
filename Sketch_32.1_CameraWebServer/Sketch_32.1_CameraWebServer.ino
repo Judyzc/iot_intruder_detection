@@ -118,4 +118,5 @@ void setup() {
 void loop() {
   // PIR polling
   hardware_poll();
+  // delay(10);
 }
