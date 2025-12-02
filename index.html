@@ -246,7 +246,7 @@
   document.getElementById("startBtn").addEventListener("click", function() {
     if(interval !== null) return; 
     collectData();
-    interval = setInterval(collectData, 5000);
+    interval = setInterval(collectData, 300000);
   });
 
     document.getElementById("stopBtn").addEventListener("click", function() {
