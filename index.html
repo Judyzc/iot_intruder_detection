@@ -6,22 +6,74 @@
   <style>
     body { font-family: Arial; background: #f4f4f4; padding: 20px; }
     #myDiv { width: 80%; height: 400px; margin: auto; }
-    button { padding: 10px 20px; margin-top: 20px; display: block; margin-left: auto; margin-right: auto; }
+    .button-container {
+        display: flex;
+        justify-content: center;  
+        gap: 20px;                 
+        margin-top: 20px;
+    }
+    button {
+        padding: 10px 25px;
+        font-size: 16px;
+        border: none;
+        border-radius: 12px;       
+        background-color: #007BFF; 
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.3s, transform 0.2s;
+    }
+
+    button:hover {
+        background-color: #0056b3; 
+        transform: scale(1.05);    
+    }
+
+    button:active {
+        transform: scale(0.98);   
+    }
+   
   </style>
 </head>
 <body>
 
-<h2 style="text-align:center">Room Detection: Intruders vs Registered</h2>
+<h1>Your Dashboard</h1>
+
+<div>Welcome your iOT dashboard, where you can analyze real-time data from your device.</div>
+<br />
+<div>Device Status: </div>
+<br />
+<div class="button-container">
+    <button id="startBtn">Start Data Collection</button>
+    <button id="stopBtn">Stop Data Collection</button>
+</div>
+<br />
+<br />
+<div id="info"></div>
+<h2 style="text-align:center">Intruders and Registered Users Count </h2>
 <div id="myDiv"></div>
-<button id="startBtn">Start Simulation</button>
+<h2 style="text-align:center">Recognition Confidence</h2>
+<div style="text-align:center">Confidence metrics are only reported for registered visitors. </div>
+<br />
+<div id="myDiv1"></div>
+<h2 style="text-align:center">Confidence per Registered Face</h2>
+<div id="myDiv3"></div>
 
 <script>
- 
-  let timeStamps = [];         
+  // data plot graphs 
+  let timeStamps = []; 
+  let timeStamps_confidences = [];        
   let intrudersCounts = [];    
-  let registeredCounts = [];   
+  let registeredCounts = []; 
+  let confidenceValues = []; 
 
 
+  // intruder and visitor metrics during the entirety of data collection 
+  let totalIntruders = 0;
+  let totalRegistered = 0;
+
+  // face Id to average confidence for entirety of data collection 
+  let faceConfidences = {};
+ 
   let data = [
     {
       x: timeStamps,
@@ -46,82 +98,221 @@
     yaxis: { title: 'Number of People', range: [0, 10] }
   });
 
+  Plotly.newPlot("myDiv1", [
+    { x: timeStamps_confidences, y: confidenceValues, mode: "lines+markers", name: "Avg Confidence" }
+    ], {
+    title: "Average Model Confidence Every 5 Minutes",
+    xaxis: { title: "Time" },
+    yaxis: { title: "Confidence (0-1)" }
+    });
+  
+  Plotly.newPlot('myDiv3', [{
+    x: [],
+    y: [],
+    type: 'bar',
+    marker: { color: '#007BFF' }
+  }], {
+    title: 'Average Confidence per Registered Face',
+    xaxis: { title: 'Face ID',  type: 'category' },
+    yaxis: { title: 'Confidence', range: [0, 1] }
+  })
+
+  
+
   async function getCounts() {
     try {
         const response = await fetch("http://54.167.124.79:5000/recent");
         const data = await response.json();
 
-        let intruderCount = 0;
-        let registeredCount = 0;
-
+        var intruderCount = 0;
+        var registeredCount = 0;
+        let tempConfidences = [];
+        let faceConfidences = {}
+        // Every five minutes, pull from the database server to count the number of intruders and registered visitors
+        // that entered the room during a 5 minute interval. Each interval is independent from each other.
+       
         data.forEach(entry => {
         if (entry.intruder_status === true) {
             intruderCount++;
-            
+            totalIntruders++;
         } else if (entry.intruder_status === false) {
             registeredCount++;
+            totalRegistered++;
+            // Storing data in two global arrays - one array is for the entirety of the data collection period. The other array is for the five minute interval.
+            if(entry.confidence>0.0){
+              tempConfidences.push(entry.confidence);
+              if(!faceConfidences[entry.face_id]) faceConfidences[entry.face_id] = [];
+              faceConfidences[entry.face_id].push(entry.confidence);
+            }
         }
         });
 
-        
         return {
         intruderCount,
         registeredCount,
+        tempConfidences,
+        faceConfidences,
         };
 
     } catch (error) {
         console.error("Error fetching or counting:", error);
 
-        
         return {
         intruderCount: 0,
         registeredCount: 0,
+        tempConfidences: [],
+        faceConfidences: {},
         };
     }
     }
 
-  async function simulateDetection() {
+  async function collectData() {
 
     let now = new Date();
     let timeStr = now.toLocaleTimeString(); 
 
-    const { intruderCount, registeredCount } = await getCounts();
-
-    console.log("intruder count");
-    console.log(intruderCount);
-
-    console.log("registered");
-    console.log(registeredCount);
-
+    const {intruderCount, registeredCount, tempConfidences, faceConfidences} = await getCounts();
+   
     timeStamps.push(timeStr);
     intrudersCounts.push(intruderCount);
     registeredCounts.push(registeredCount);
-
     Plotly.update('myDiv', {
       y: [intrudersCounts, registeredCounts],
       x: [timeStamps, timeStamps]
     });
-
+    
+    if(tempConfidences.length>0){
+        timeStamps_confidences.push(timeStr);
+        //plotting the average confidences in a 5 minute interval
+        const confidence_val = tempConfidences.reduce((sum, val) => sum + val, 0) / tempConfidences.length;
+        confidenceValues.push(confidence_val);
+        Plotly.update("myDiv1", {
+            x: [timeStamps_confidences],
+            y: [confidenceValues]
+        });
+    }
   
+    // recalculating the averages for all of the ids in the dataset and then plotting
+    let avgConfidences = Object.keys(faceConfidences).map(id => {
+        let vals = faceConfidences[id];
+        let sum = vals.reduce((a,b) => a+b, 0);
+        return { id, avg: sum / vals.length };
+    });
+
+    Plotly.update('myDiv3',
+      {
+        x: [avgConfidences.map(d => String(d.id))],
+        y: [avgConfidences.map(d => d.avg)]
+      },
+      {
+        xaxis: { type: 'category' }
+      }
+    );
+    
+
     if(timeStamps.length > 10) {
       timeStamps.shift();
       intrudersCounts.shift();
       registeredCounts.shift();
+      confidenceValues.shift();
+      
       Plotly.update('myDiv', {
         y: [intrudersCounts, registeredCounts],
         x: [timeStamps, timeStamps]
       });
+      
     }
+    if(timeStamps_confidences.length > 10) {
+      timeStamps_confidences.shift();
+      Plotly.update("myDiv1", {
+            x: [timeStamps_confidences],
+            y: [confidenceValues]
+      });
+    }
+
+     document.getElementById("info").innerHTML = `
+    <div>
+        Intruders detected after data collection started: <strong>${totalIntruders}</strong>
+    </div>
+    <br />
+    <div>
+        Registered visitors detected after data collection started: <strong>${totalRegistered}</strong>
+    </div>
+    `;
   }
+
 
   let interval = null;
   document.getElementById("startBtn").addEventListener("click", function() {
     if(interval !== null) return; 
-    simulateDetection();
-    interval = setInterval(simulateDetection, 300000);
+    collectData();
+    interval = setInterval(collectData, 5000);
   });
 
+    document.getElementById("stopBtn").addEventListener("click", function() {
+        if(interval !== null) {
+            clearInterval(interval); 
+            interval = null;         
+            console.log("Data collection stopped.");
+        }
+        totalIntruders=0;
+        totalRegistered=0;
+         
+        timeStamps = [];         
+        intrudersCounts = [];    
+        registeredCounts = []; 
+        confidenceValues = []; 
+        timeStamps_confidences = [];
+
+        faceConfidences = {};
+ 
+        tempConfidences = [];
+
+        //Resetting all of the graphs
+        Plotly.react('myDiv', [
+          { x: [], y: [], name: 'Intruders', type: 'bar', marker: { color: 'red' } },
+          { x: [], y: [], name: 'Registered', type: 'bar', marker: { color: 'green' } }
+        ], {
+          barmode: 'stack',
+          title: 'Number of People Detected Every 5 minutes',
+          xaxis: { title: 'Time' },
+          yaxis: { title: 'Number of People', range: [0, 10] }
+        });
+
+        Plotly.react("myDiv1", [
+          { x: [], y: [], mode: "lines+markers", name: "Avg Confidence" }
+        ], {
+          title: "Average Model Confidence Every 5 Minutes",
+          xaxis: { title: "Time" },
+          yaxis: { title: "Confidence (0-1)" }
+        });
+
+        Plotly.react('myDiv3', [{
+          x: [],
+          y: [],
+          type: 'bar',
+          marker: { color: '#007BFF' }
+        }], {
+          title: 'Average Confidence per Registered Face',
+          xaxis: { title: 'Face ID', type: 'category' },
+          yaxis: { title: 'Confidence', range: [0, 1] }
+        });
+
+        document.getElementById("info").innerHTML = `
+    <div>
+        Intruders detected after data collection started: <strong>0</strong>
+    </div>
+    <br />
+    <div>
+        Registered visitors detected after data collection started: <strong>0</strong>
+    </div>
+    `;
+
+    });
+
+  
 </script>
 
 </body>
 </html>
+
