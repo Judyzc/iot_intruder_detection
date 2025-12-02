@@ -3,14 +3,21 @@
 #include "hardware_control.h"
 #include "intruder_task.h"
 
+// Thermal IR 
+#define SDA_PIN 37
+#define SCL_PIN 38
+const uint8_t MLX_ADDR = MLX90614_I2CADDR; // default 0x5A
+// temThp sensor
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+TwoWire I2C = TwoWire(0);
+
 // camera module
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
 
 //WiFi Credentials
-// const char* ssid     = "DukeVisitor";
-// const char* password = "";
-
+const char* ssid     = "DukeVisitor";
+const char* password = "";
 
 // PIR variables
 unsigned long lastTime = 0;
@@ -20,6 +27,8 @@ unsigned long timerDelay = 5000;
 void startCameraServer();
 
 
+
+/* initialize camera, wifi, all hardware peripherals*/
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -114,10 +123,33 @@ void setup() {
   // start (initialize) other components
   hardware_init();
   intruder_task_init(); 
+
+  // thermal IR 
+  I2C.begin(SDA_PIN, SCL_PIN, 100000);
+  delay(20);
+  if (!mlx.begin(MLX_ADDR, &I2C)) {
+    Serial.println("Error connecting to MLX sensor");
+  } else {
+    Serial.println("MLX90614 initialized");
+  }
 }
 
 void loop() {
-  // PIR polling
-  hardware_poll();
-  // delay(10);
+  // PIR 
+  hardware_main();
+
+  // // thermal IR 
+  // static unsigned long lastPrint = 0;
+  // if (millis() - lastPrint >= 500) { // every 500 ms
+  //   lastPrint = millis();
+  //   float ambF = mlx.readAmbientTempF();
+  //   float objF = mlx.readObjectTempF();
+  //   Serial.print("Ambient = ");
+  //   Serial.print(ambF);
+  //   Serial.print("*F\tObject = ");
+  //   Serial.print(objF);
+  //   Serial.println("*F");
+  //   Serial.println();
+  // }
+
 }

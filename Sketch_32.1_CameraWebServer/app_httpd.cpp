@@ -183,8 +183,10 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
         rgb_printf(fb, FACE_COLOR_CYAN, "ID[%u]", id);
     }
 
+    /* log face recognition data in database */
     face_info_t recognize = recognizer.recognize(tensor, landmarks);
-    if(recognize.id >= 0){
+    float objF = mlx.readObjectTempF();
+    if(recognize.id >= 0 && objF > 80.00){
         rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
         send_to_database(false, recognize.id, recognize.similarity);
     } else {

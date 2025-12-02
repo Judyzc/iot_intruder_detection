@@ -5,6 +5,13 @@
 #include "esp_timer.h"
 #include "driver/gpio.h"
 
+#pragma once
+#include <Wire.h>
+#include <Adafruit_MLX90614.h>
+
+extern Adafruit_MLX90614 mlx;
+extern TwoWire I2C;
+
 
 // ---------- GPIO Configuration ----------
 #ifndef INTRUDER_LED_GPIO
@@ -36,8 +43,6 @@ extern hw_led_t pir_led;        // optional: expose pir_led too
 
 extern volatile bool pir_triggered;           // set by ISR
 extern volatile bool pir_active;              // set by hardware_poll() to enable face detection window
-//extern volatile uint32_t pir_active_until_ms; // expiry time (millis) for pir_active window
-
 extern int64_t pir_active_until_ms; 
 
 #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
@@ -74,10 +79,10 @@ bool hardware_led_is_on(hw_led_t *led);
 
 // ---------- PIR Sensor Handling ----------
 /**
- * @brief Poll for PIR events and handle them in non-ISR context.
+ * @brief Run logic for for PIR events and handle them in non-ISR context.
  *        Should be called frequently from loop() or a task.
  */
-void hardware_poll(void);
+void hardware_main(void);
 
 
 void hardware_buzz(void);
