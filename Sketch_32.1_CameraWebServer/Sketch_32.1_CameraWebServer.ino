@@ -3,7 +3,8 @@
 #include "hardware_control.h"
 #include "intruder_task.h"
 
-// camera module
+
+// Camera module
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
 
@@ -12,12 +13,7 @@
 // const char* password = "";
 
 
-// PIR variables
-unsigned long lastTime = 0;
-unsigned long timerDelay = 5000;
-
-// forward init camera web server function
-void startCameraServer();
+void startCameraServer(); // Defined in app_httpd.cpp
 
 
 void setup() {
@@ -52,18 +48,10 @@ void setup() {
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
   config.fb_count = 2;
-  
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality for larger pre-allocated frame buffer.
-  // our esp uses PSRAM for face recognition
-  if(psramFound()){
-    config.jpeg_quality = 10;
-    config.fb_count = 2;
-    config.grab_mode = CAMERA_GRAB_LATEST;
-  } else {
-    // Limit the frame size when PSRAM is not available
-    config.fb_count = 1;
-    config.fb_location = CAMERA_FB_IN_DRAM;
-  }
+  // for PSRAM
+  config.jpeg_quality = 10;
+  config.fb_count = 2;
+  config.grab_mode = CAMERA_GRAB_LATEST;
 
   // camera init
   esp_err_t err = esp_camera_init(&config);
@@ -111,13 +99,17 @@ void setup() {
     Serial.println("Camera server started but no WiFi IP assigned.");
   }
 
-  // start (initialize) other components
   hardware_init();
   intruder_task_init(); 
 }
 
+unsigned long lastPoll = 0;
+const unsigned long pollInterval = 100; // ms
+
 void loop() {
-  // PIR polling
-  hardware_poll();
-  // delay(10);
+  unsigned long now = millis();
+  if (now - lastPoll >= pollInterval) {
+    lastPoll = now;
+    hardware_poll();
+  }
 }
