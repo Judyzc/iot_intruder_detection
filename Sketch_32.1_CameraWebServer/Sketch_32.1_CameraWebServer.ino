@@ -11,10 +11,9 @@
 #define TAG "camera: "
 
 //WiFi Credentials
-// const char* ssid     = "DukeVisitor";
-// const char* password = "";
-const char* ssid     = "707-04";
-const char* password = "duKE25!@LK";
+const char* ssid     = "DukeVisitor";
+const char* password = "";
+
 
 void startCameraServer(); // Defined in app_httpd.cpp
 

@@ -48,15 +48,6 @@
 #define FACE_COLOR_PURPLE (FACE_COLOR_BLUE | FACE_COLOR_RED)
 #define ENROLL_INTERVAL_MS 5000  // 5 seconds between enroll captures (tune if you like)
 
-
-static bool show_enroll_msg = false;
-static char enroll_msg_text[64];
-static int64_t enroll_msg_until_us = 0;
-#define ENROLL_MSG_DURATION_MS 3000   // show for 3 seconds
-
-
-
-
 // Enables live streaming over HTTP by mix of JPEG to MJPEG though mixed
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char *_STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
@@ -86,6 +77,11 @@ volatile int8_t recognition_enabled = 0;
 */
 FaceRecognition112V1S8 recognizer;
 
+// Logic for delaying showing the enrollment messages on screen
+static bool show_enroll_msg = false;
+static char enroll_msg_text[64];
+static int64_t enroll_msg_until_us = 0;
+#define ENROLL_MSG_DURATION_MS 3000   // show for 3 seconds
 
 /*Prints out text at top of frame buffer (intruder, id, confidence, etc)*/
 static void rgb_print(fb_data_t *fb, uint32_t color, const char *str)
@@ -193,33 +189,13 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
     Tensor<uint8_t> tensor;
     tensor.set_element((uint8_t *)fb->data).set_shape({fb->height, fb->width, 3}).set_auto_free(false);
 
-    // // If enrolling, a face, check how many faces can be enrolled
-    // int enrolled_count = recognizer.get_enrolled_id_num();
 
-    // if (enrolled_count < FACE_ID_SAVE_NUMBER && is_enrolling){
-    //     id = recognizer.enroll_id(tensor, landmarks, "", true);
-    //     ESP_LOGI(TAG, "Enrolled ID: %d", id);
-    //     rgb_printf(fb, FACE_COLOR_CYAN, "ID[%u]", id);
-    // }
-
-    // // If running facial recognition
-    // face_info_t recognize = recognizer.recognize(tensor, landmarks);
-    // if(recognize.id >= 0){ // recognizes the owner
-    //     rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
-    //     // send_to_database(false, recognize.id, recognize.similarity);
-    // } else { // recognizes an intruder
-    //     rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
-    //     // intruder_queue_send(1);
-    //     Serial.println("INTRUDER");
-    //     // send_to_database(true, -1, 200.0);
-    // }
-    // return recognize.id;
-        // If enrolling, a face, check how many faces can be enrolled
+    // If enrolling, a face, check how many faces can be enrolled
     int enrolled_count = recognizer.get_enrolled_id_num();
     bool did_enroll = false;
 
     if (enrolled_count < FACE_ID_SAVE_NUMBER && is_enrolling) {
-        // static last-enroll timestamp (microseconds)
+        // timestamp of last enroll, 5 second intervals for enrolling
         static int64_t last_enroll_time_us = 0;
         int64_t now_us = esp_timer_get_time();
 
@@ -228,16 +204,12 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
             last_enroll_time_us = now_us;
             did_enroll = true;
             ESP_LOGI(TAG, "Enrolled ID: %d", id);
-            // // show a single enroll message (cyan) and DO NOT run/print recognition this frame
-            // rgb_printf(fb, FACE_COLOR_CYAN, "Enrolled ID[%u]", id);
-            // // return the new id (or you can continue to run recognition next heavy frame)
-            // return id;
-            // Format and store "sticky" enrollment message
+
+            // delay a little to slow down enrolling and verify that identity has been enrolled
             sprintf(enroll_msg_text, "ID[%u] enrolled", id);
             show_enroll_msg = true;
             enroll_msg_until_us = esp_timer_get_time() + (int64_t)ENROLL_MSG_DURATION_MS * 1000;
 
-            // Also draw it on THIS frame
             rgb_printf(fb, FACE_COLOR_CYAN, enroll_msg_text);
 
             return id;
@@ -245,18 +217,18 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
         }
     }
 
-    // If not a fresh enrollment this frame, run facial recognition and only print one result
     face_info_t recognize = recognizer.recognize(tensor, landmarks);
     if(!is_enrolling){
     if (recognize.id >= 0) {
         // recognized owner — print single green line
         rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
-        // send_to_database(false, recognize.id, recognize.similarity);
+        send_to_database(false, recognize.id, recognize.similarity);
     } else {
         // intruder — single red message
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
+        intruder_queue_send(1);
         Serial.println("INTRUDER");
-        // send_to_database(true, -1, 200.0);
+        send_to_database(true, -1, 200.0);
     }
     }
     return recognize.id;
@@ -266,9 +238,7 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
 // Used to check either flag and determine if recognition or detection has been triggered by gui or pir
 void recompute_face_state() {
     // // recognition depends on detection
-    // recognition_enabled = (recognition_via_gui || recognition_via_pir) ? 1 : 0;
-    // detection_enabled = (detection_via_gui || detection_via_pir || is_enrolling) ? 1 : 0;
-        // If no face has been enrolled yet, ignore PIR-sourced requests to enable detection/recognition.
+    // If no face has been enrolled yet, ignore PIR-sourced requests to enable detection/recognition.
     int enrolled_count = recognizer.get_enrolled_id_num();
     if (enrolled_count == 0) {
         if (detection_via_pir || recognition_via_pir) {
@@ -332,8 +302,6 @@ static esp_err_t stream_handler(httpd_req_t *req)
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "X-Framerate", "60");
-
-
 
     // loop to contiuously send frames until disconnect
     while (true)
@@ -449,15 +417,14 @@ static esp_err_t stream_handler(httpd_req_t *req)
                                 draw_face_boxes(&rfb, &results, face_id);
                             }
                             // Keep enrollment message on screen for N ms
-if (show_enroll_msg) {
-    if (esp_timer_get_time() < enroll_msg_until_us) {
-        // redraw stored enroll message
-        rgb_print(&rfb, FACE_COLOR_CYAN, enroll_msg_text);
-    } else {
-        show_enroll_msg = false; // stop showing it
-    }
-}
-
+                            if (show_enroll_msg) {
+                                if (esp_timer_get_time() < enroll_msg_until_us) {
+                                    // redisplay enrolled message
+                                    rgb_print(&rfb, FACE_COLOR_CYAN, enroll_msg_text);
+                                } else {
+                                    show_enroll_msg = false; // stop displaying
+                                }
+                            }
                             s = fmt2jpg(out_buf, out_len, out_width, out_height, PIXFORMAT_RGB888, 90, &_jpg_buf, &_jpg_buf_len);
                             free(out_buf);
                             if (!s) {

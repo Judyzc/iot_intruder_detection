@@ -35,13 +35,6 @@
 #define PIR_DETECTION_WINDOW_MS 30000u // 30 seconds
 #endif
 
-// 
-// typedef struct {
-//   gpio_num_t pin;
-//   esp_timer_handle_t timer;
-//   volatile bool state;
-//   const char *name;
-// } hw_led_t;
 
 // define led structs
 hw_led_t intruder_led = {
