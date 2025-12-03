@@ -10,6 +10,7 @@
 #include <HTTPClient.h>
 #include "face_state.h"
 #include <WiFiClientSecure.h>
+#include "hardware_control.h"
 #define TAG "hardware: "
 
 // gpio
@@ -62,7 +63,7 @@ hw_led_t pir_led = {
 // pir trigger vars
 volatile bool pir_triggered = false;
 volatile bool pir_active = false;
-volatile uint32_t pir_active_until_ms = 0;
+int64_t pir_active_until_ms = 0;
 
 
 // text message variables

@@ -4,6 +4,7 @@
 #include "intruder_task.h"
 
 
+
 // Camera module
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
@@ -12,6 +13,8 @@
 //WiFi Credentials
 // const char* ssid     = "DukeVisitor";
 // const char* password = "";
+const char* ssid     = "707-04";
+const char* password = "duKE25!@LK";
 
 void startCameraServer(); // Defined in app_httpd.cpp
 
@@ -22,11 +25,11 @@ void setup() {
   Serial.setDebugOutput(true);
 
   // To view ESP logs in Arudino, set core debug level to verbose and uncomment
-  esp_log_level_set("*", ESP_LOG_VERBOSE);
-  esp_log_level_set("app", ESP_LOG_VERBOSE);
-  esp_log_level_set("camera", ESP_LOG_VERBOSE);
-  esp_log_level_set("hardware", ESP_LOG_VERBOSE);
-  Serial.println("esp_log_level_set calls done");
+  // esp_log_level_set("*", ESP_LOG_VERBOSE);
+  // esp_log_level_set("app", ESP_LOG_VERBOSE);
+  // esp_log_level_set("camera", ESP_LOG_VERBOSE);
+  // esp_log_level_set("hardware", ESP_LOG_VERBOSE);
+  // Serial.println("esp_log_level_set calls done");
 
 
   //Camera Pins on ESP32S3
