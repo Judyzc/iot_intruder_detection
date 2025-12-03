@@ -5,8 +5,7 @@
 #include "esp_timer.h"
 #include "driver/gpio.h"
 
-
-// ---------- GPIO Configuration ----------
+// GPIO pins
 #ifndef INTRUDER_LED_GPIO
 #define INTRUDER_LED_GPIO GPIO_NUM_21
 #endif
@@ -20,8 +19,7 @@
 #endif
 
 
-
-// ---------- Data Structures ----------
+// LED struct
 typedef struct {
     gpio_num_t pin;
     esp_timer_handle_t timer;
@@ -30,60 +28,39 @@ typedef struct {
 } hw_led_t;
 
 
-// after typedef hw_led_t ...
-extern hw_led_t intruder_led;   // expose the global intruder LED object
-extern hw_led_t pir_led;        // optional: expose pir_led too
-
-extern volatile bool pir_triggered;           // set by ISR
-extern volatile bool pir_active;              // set by hardware_poll() to enable face detection window
-//extern volatile uint32_t pir_active_until_ms; // expiry time (millis) for pir_active window
-
+extern hw_led_t intruder_led; 
+extern hw_led_t pir_led;      
+extern volatile bool pir_triggered;       
+extern volatile bool pir_active;             
 extern int64_t pir_active_until_ms; 
+extern volatile int8_t recognition_enabled;
+extern volatile int8_t detection_enabled;
 
-#if CONFIG_ESP_FACE_RECOGNITION_ENABLED
-extern int8_t recognition_enabled;
-extern int8_t is_enrolling;
-#endif
-
-// ---------- Initialization ----------
-/**
- * @brief Initialize LEDs, PIR sensor input, and attach interrupts.
- */
+/* Initialize LEDs, PIR sensor input, and attach interrupts */
 void hardware_init(void);
 
-// ---------- Generic LED Control ----------
-/**
- * @brief Initialize a single LED (called internally).
- */
+/* Initialize a single LED*/
 esp_err_t hardware_led_init(hw_led_t *led);
 
-/**
- * @brief Pulse the given LED for the specified duration (ms).
- */
+/* Pulse the given LED for the given amount of time*/
 void hardware_led_pulse(hw_led_t *led, uint32_t ms);
 
-/**
- * @brief Turn the LED off immediately.
- */
+/* Turn the LED off */
 void hardware_led_off(hw_led_t *led);
 
-/**
- * @brief Returns true if the LED is currently ON.
- */
+/* Returns true if the LED is ON */
 bool hardware_led_is_on(hw_led_t *led);
 
-// ---------- PIR Sensor Handling ----------
-/**
- * @brief Poll for PIR events and handle them in non-ISR context.
- *        Should be called frequently from loop() or a task.
- */
-void hardware_poll(void);
+/* Poll for PIR events and handles corresponding action (not in ISR) */
+void hardware_control(void);
 
-
+/* Turns on buzzer for a second */
 void hardware_buzz(void);
 
+/* Sends intruder status, face id and confidence to EC2 database */
 void send_to_database(bool intruder_status, int face_id, float confidence);
 
+/* Sends whatsapp message through chat me bot to notify owner*/
 void sendIntruderAlert(void);
 
-#endif // HARDWARE_CONTROL_H
+#endif

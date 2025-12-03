@@ -11,10 +11,9 @@ static void intruder_task(void *arg) {
     uint32_t msg;
     while (true) {
         if (xQueueReceive(intruderQueue, &msg, portMAX_DELAY)) {
-            // perform non-UI-blocking operations here
-            hardware_buzz();                 // ensure non-blocking
-            hardware_led_pulse(&intruder_led, 5000); // non-blocking
-            sendIntruderAlert();             // blocking OK here
+            hardware_buzz();           
+            hardware_led_pulse(&intruder_led, 5000); 
+            sendIntruderAlert();          
         }
     }
 }

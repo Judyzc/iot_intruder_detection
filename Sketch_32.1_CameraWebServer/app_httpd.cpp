@@ -16,20 +16,27 @@
 #include <HTTPClient.h>
 #define TAG "app: "
 
-
 /* all part of face detection and recogition */
 #include <vector>
 #include <list>
 #include <cstdarg> 
-#include "human_face_detect_msr01.hpp"
+// First Stage Detector - Multi State Regression 1 - Run lightweight model to find potential face candidate regions
+// Outputs a bounding box
+// (score_threshold, nms_threshold, top_k, center_variance)
+#include "human_face_detect_msr01.hpp" 
+// Second Stage Detector - Multi Network Pipeline - Takes bounding boxes and improves location and add facial landmarks
+// Needed for proper landmark alignment -- two stage recognition
 #include "human_face_detect_mnp01.hpp"
 /* we need TWO_STAGE === 1 for facial recognition */
 #define TWO_STAGE 1 /*<! 1: detect by two-stage which is more accurate but slower(with keypoints). */
                     /*<! 0: detect by one-stage which is less accurate but faster(without keypoints). */
 #include "face_recognition_tool.hpp"
+// Espressif face recognition models
+// 16-bit vs 8 bit signed weights/activations
 #include "face_recognition_112_v1_s16.hpp"
-#include "face_recognition_112_v1_s8.hpp"
+#include "face_recognition_112_v1_s8.hpp" // less accurate but runs faster - what we're using!
 
+// Max number of enrolled faces
 #define FACE_ID_SAVE_NUMBER 7
 #define FACE_COLOR_WHITE 0x00FFFFFF
 #define FACE_COLOR_BLACK 0x00000000
@@ -41,7 +48,7 @@
 #define FACE_COLOR_PURPLE (FACE_COLOR_BLUE | FACE_COLOR_RED)
 
 
-/* not sure what this is honestly */
+// Enables live streaming over HTTP by mix of JPEG to MJPEG though mixed
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char *_STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char *_STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
@@ -61,7 +68,13 @@ volatile int8_t is_enrolling = 0;
 volatile int8_t detection_enabled = 0;
 volatile int8_t recognition_enabled = 0;
 
-/* face recognition model */
+/* 
+    face recognition model (neural network) 
+    extracts face embeddings and compares to IDs
+    enrolls new IDs
+    loads/saves IDs to flash
+    (112x112) aligned face images with 8 bit signed weights and activations
+*/
 FaceRecognition112V1S8 recognizer;
 
 
@@ -71,6 +84,7 @@ static void rgb_print(fb_data_t *fb, uint32_t color, const char *str)
     fb_gfx_print(fb, (fb->width - (strlen(str) * 14)) / 2, 10, color, str);
 }
 
+// Prints out ID and confidence values onto screen
 static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
 {
     char loc_buf[64];
@@ -81,7 +95,6 @@ static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
 
     va_start(arg, format);
 
-    // First get required length using a copy of arg
     va_copy(copy, arg);
     len = vsnprintf(NULL, 0, format, copy);
     va_end(copy);
@@ -99,7 +112,6 @@ static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
         }
     }
 
-    // Now actually format into the buffer using arg (arg is still valid)
     vsnprintf(temp, (size_t)len + 1, format, arg);
     va_end(arg);
 
@@ -113,7 +125,7 @@ static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
 }
 
 
-/*Draw rectangles and landmark indicators for detected face*/
+/*Draw rectangles and 5 landmark indicators for detected face*/
 static void draw_face_boxes(fb_data_t *fb, std::list<dl::detect::result_t> *results, int face_id)
 {
     int x, y, w, h;
@@ -159,15 +171,20 @@ static void draw_face_boxes(fb_data_t *fb, std::list<dl::detect::result_t> *resu
     }
 }
 
-/*Runs facial recognition*/
+/*
+    Runs facial recognition
+    Takes detected face and keypoints - converts into tensor to put into the NN    
+*/
 static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *results)
 {
     std::vector<int> landmarks = results->front().keypoint;
     int id = -1;
 
+    // Turns framebuffer into a Tensor object to put into the NN
     Tensor<uint8_t> tensor;
     tensor.set_element((uint8_t *)fb->data).set_shape({fb->height, fb->width, 3}).set_auto_free(false);
 
+    // If enrolling, a face, check how many faces can be enrolled
     int enrolled_count = recognizer.get_enrolled_id_num();
 
     if (enrolled_count < FACE_ID_SAVE_NUMBER && is_enrolling){
@@ -176,11 +193,12 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
         rgb_printf(fb, FACE_COLOR_CYAN, "ID[%u]", id);
     }
 
+    // If running facial recognition
     face_info_t recognize = recognizer.recognize(tensor, landmarks);
-    if(recognize.id >= 0){
+    if(recognize.id >= 0){ // recognizes the owner
         rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
         // send_to_database(false, recognize.id, recognize.similarity);
-    } else {
+    } else { // recognizes an intruder
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
         // intruder_queue_send(1);
         Serial.println("INTRUDER");
@@ -189,7 +207,7 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
     return recognize.id;
 }
 
-/*logs face*/
+// Used to check either flag and determine if recognition or detection has been triggered by gui or pir
 void recompute_face_state() {
     // recognition depends on detection
     recognition_enabled = (recognition_via_gui || recognition_via_pir) ? 1 : 0;
@@ -203,7 +221,8 @@ void recompute_face_state() {
              detection_enabled, recognition_via_gui, recognition_via_pir, recognition_enabled);
 }
 
-// the good stuff
+// THE GOOD STUFF
+// Live MJPEG Face Detection and Recognition
 
 static esp_err_t stream_handler(httpd_req_t *req)
 {
@@ -212,7 +231,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
     esp_err_t res = ESP_OK;
     size_t _jpg_buf_len = 0;
     uint8_t *_jpg_buf = NULL;
-    char *part_buf[128];   // chat: change to char, instead of char*
+    char part_buf[128];
         bool detected = false;
         int64_t fr_ready = 0;
         int64_t fr_recognize = 0;
@@ -224,6 +243,8 @@ static esp_err_t stream_handler(httpd_req_t *req)
     uint8_t *out_buf = NULL;
     bool s = false;
 #if TWO_STAGE
+    // Can alter this to make more sensitive
+    // (score thresholds, NMS, top_K, variance)
     HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);
     HumanFaceDetectMNP01 s2(0.5F, 0.3F, 5);
 #else
@@ -241,6 +262,10 @@ static esp_err_t stream_handler(httpd_req_t *req)
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "X-Framerate", "60");
+
+
+
+    // loop to contiuously send frames until disconnect
     while (true)
     {
         detected = false;
@@ -260,6 +285,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
             fr_encode = fr_start;
             fr_recognize = fr_start;
             fr_face = fr_start;
+            // when not detecting or enrolling, faster camera stream
             if ((!detection_enabled && !is_enrolling) || fb->width > 400)
             {
                 if (fb->format != PIXFORMAT_JPEG)
@@ -279,12 +305,13 @@ static esp_err_t stream_handler(httpd_req_t *req)
                     _jpg_buf = fb->buf;
                 }
             }
-            else
+            else //if only doing detection, runs on RGB565 path
             {
                 if (fb->format == PIXFORMAT_RGB565 && !recognition_enabled && !is_enrolling)
                 {
                     fr_ready = esp_timer_get_time();
 #if TWO_STAGE
+                    // running detection on the output buffer
                     std::list<dl::detect::result_t> &candidates = s1.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3});
                     std::list<dl::detect::result_t> &results = s2.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3}, candidates);
 #else
@@ -310,7 +337,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                         res = ESP_FAIL;
                     }
                     fr_encode = esp_timer_get_time();
-                } else
+                } else // full frame stream - needed for facial recognition
                 {
                     out_len = fb->width * fb->height * 3;
                     out_width = fb->width;
@@ -409,7 +436,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
     return res;
 }
 
-
+// helper for parsing query
 static esp_err_t parse_get(httpd_req_t *req, char **obuf)
 {
     char *buf = NULL;
@@ -431,35 +458,26 @@ static esp_err_t parse_get(httpd_req_t *req, char **obuf)
     return ESP_FAIL;
 }
 
-
+// handles UI controls 
 static esp_err_t cmd_handler(httpd_req_t *req)
 {
     char *buf = NULL;
     char variable[32];
     char value[32];
 
-    // if (parse_get(req, &buf) != ESP_OK) {
-    //     return ESP_FAIL;
-    // }
-    // if (httpd_query_key_value(buf, "var", variable, sizeof(variable)) != ESP_OK ||
-    //     httpd_query_key_value(buf, "val", value, sizeof(value)) != ESP_OK) {
-    //     free(buf);
-    //     httpd_resp_send_404(req);
-    //     return ESP_FAIL;
-    // }
-        if (parse_get(req, &buf) != ESP_OK) {
+
+    if (parse_get(req, &buf) != ESP_OK) {
         return ESP_FAIL;
     }
 
-    // require "var", but treat "val" as optional (empty string if not present)
     if (httpd_query_key_value(buf, "var", variable, sizeof(variable)) != ESP_OK) {
         free(buf);
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
-    // Try to read val; if missing, leave value as empty string
+
     if (httpd_query_key_value(buf, "val", value, sizeof(value)) != ESP_OK) {
-        value[0] = '\0'; // indicate "no val given"
+        value[0] = '\0';
     }
     free(buf);
 
@@ -468,12 +486,7 @@ static esp_err_t cmd_handler(httpd_req_t *req)
     sensor_t *s = esp_camera_sensor_get();
     int res = 0;
 
-    if (!strcmp(variable, "framesize")) {
-        if (s->pixformat == PIXFORMAT_JPEG) {
-            res = s->set_framesize(s, (framesize_t)val);
-        }
-    }
-    else if (!strcmp(variable, "quality"))
+    if (!strcmp(variable, "quality"))
         res = s->set_quality(s, val);
     else if (!strcmp(variable, "contrast"))
         res = s->set_contrast(s, val);
@@ -481,50 +494,29 @@ static esp_err_t cmd_handler(httpd_req_t *req)
         res = s->set_brightness(s, val);
     else if (!strcmp(variable, "saturation"))
         res = s->set_saturation(s, val);
-   
-else if (!strcmp(variable, "face_detect")) {
-    // GUI explicitly toggles detection on/off
+    else if (!strcmp(variable, "face_detect")) {
     detection_via_gui = (val != 0);
-    // If GUI turns detection off, also turn GUI recognition off (can't have GUI-based recognition without GUI-based detection).
     if (!detection_via_gui) {
         recognition_via_gui = false;
     }
     recompute_face_state();
-}
-else if (!strcmp(variable, "face_enroll")) {
-    // Allow UI to explicitly set enroll state via ?var=face_enroll&val=0/1
-    // If val is omitted, fall back to old toggle behavior.
-    if (value != NULL && strlen(value) > 0) {
-        int v = atoi(value);
-        is_enrolling = (v != 0) ? 1 : 0;
-    } else {
-        // legacy toggle behavior
-        is_enrolling = !is_enrolling;
     }
-
-    ESP_LOGI(TAG, "Enrolling: %s", is_enrolling ? "true" : "false");
-
-    if (is_enrolling) {
-        // Ensure face detector runs so enroll can find faces.
-        // We don't change GUI or PIR flags — enrollment requires detection, so ensure the effective state enables it.
-        // Note: recompute will set detection_enabled because is_enrolling==1
-    } else {
-        // Stopping enrollment: do not force detection/recognition off.
-        // Leave detection_via_gui / detection_via_pir alone so GUI or PIR controls remain authoritative.
+    else if (!strcmp(variable, "face_enroll")) {
+        if (value != NULL && strlen(value) > 0) {
+            int v = atoi(value);
+            is_enrolling = (v != 0) ? 1 : 0;
+        } else {
+            is_enrolling = !is_enrolling;
+        }
+        recompute_face_state();
     }
-    recompute_face_state();
-}
-else if (!strcmp(variable, "face_recognize")) {
-    // GUI toggles recognition on/off
-    recognition_via_gui = (val != 0);
-    // If GUI enables recognition, ensure GUI detection flag is set so UI state matches server expectations.
-    if (recognition_via_gui) {
-        detection_via_gui = true;
+    else if (!strcmp(variable, "face_recognize")) {
+        recognition_via_gui = (val != 0);
+        if (recognition_via_gui) {
+            detection_via_gui = true;
+        }
+        recompute_face_state();
     }
-    recompute_face_state();
-}
-
-
     else {
         ESP_LOGI(TAG, "Unknown command: %s", variable);
         res = -1;
@@ -538,14 +530,13 @@ else if (!strcmp(variable, "face_recognize")) {
     return httpd_resp_send(req, NULL, 0);
 }
 
-
+// sends compressed HTTP - UI fully hosted on esp32 - address = ESP IP
 static esp_err_t index_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     sensor_t *s = esp_camera_sensor_get();
     if (s != NULL) {
-
         if (s->id.PID == OV2640_PID){
             return httpd_resp_send(req, (const char *)index_ov2640_html_gz, index_ov2640_html_gz_len);
         }

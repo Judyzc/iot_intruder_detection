@@ -10,7 +10,9 @@
 #include <HTTPClient.h>
 #include "face_state.h"
 #include <WiFiClientSecure.h>
+#define TAG "hardware: "
 
+// gpio
 #ifndef INTRUDER_LED_GPIO
 #define INTRUDER_LED_GPIO GPIO_NUM_21
 #endif
@@ -27,19 +29,20 @@
 #define BUZZ_GPIO GPIO_NUM_45
 #endif
 
-// Detection window default (ms) — tweak as needed
+// set detection window
 #ifndef PIR_DETECTION_WINDOW_MS
 #define PIR_DETECTION_WINDOW_MS 30000u // 30 seconds
 #endif
 
-typedef struct {
-  gpio_num_t pin;
-  esp_timer_handle_t timer;
-  volatile bool state;
-  const char *name;
-} hw_led_t;
+// 
+// typedef struct {
+//   gpio_num_t pin;
+//   esp_timer_handle_t timer;
+//   volatile bool state;
+//   const char *name;
+// } hw_led_t;
 
-
+// define led structs
 hw_led_t intruder_led = {
   .pin = INTRUDER_LED_GPIO,
   .timer = NULL,
@@ -56,11 +59,11 @@ hw_led_t pir_led = {
 
 
 
-// pir trigger
+// pir trigger vars
 volatile bool pir_triggered = false;
 volatile bool pir_active = false;
 volatile uint32_t pir_active_until_ms = 0;
-// volatile bool alert_pending = false;
+
 
 // text message variables
 static volatile unsigned long lastAlertTime = 0;
@@ -140,10 +143,6 @@ bool hardware_led_is_on(hw_led_t *led) {
   return led->state;
 }
 
-// PIR
-void IRAM_ATTR pir_isr() {
-  pir_triggered = true;
-}
 
 static WiFiClientSecure alertClient;
 static HTTPClient alertHttp;
@@ -182,49 +181,27 @@ void sendIntruderAlert() {
   // Serial.println("Sending text message (in theory)");
 }
 
-// void hardware_poll(void) {
-//   // handle ISR-triggered activation
-//   if (pir_triggered) {
-//     pir_triggered = false;
-//     hardware_led_pulse(&pir_led, 30000);
+// PIR
+void IRAM_ATTR pir_isr() {
+  pir_triggered = true;
+}
 
-//     pir_active = true;
-//     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS;
-//     // Enable face detection and recognition for the window
-//     detection_enabled = 1;            // run face detection
-//     delay(500);
-//     recognition_enabled = 1;          // run face recognition too (if configured)
-//     Serial.println("PIR detection: face detection + recognition enabled");
-//   }
- 
-//   if (pir_active) {
-//     int64_t now_ms = esp_timer_get_time() / 1000;
-//     if (now_ms > pir_active_until_ms) {
-//       // deactivate
-//       pir_active = false;
-//       detection_enabled = 0;
-//       recognition_enabled = 0;
-//       Serial.println("PIR detection expired: face detection + recognition disabled");
-//     }
-//   }
-// }
-void hardware_poll(void) {
-  // handle ISR-triggered activation
+// looping to check if pir changed variables - called in main .ino file
+void hardware_control(void) {
   if (pir_triggered) {
     pir_triggered = false;
 
-    Serial.println("hardware_poll: pir_triggered true");
-    // Use PIR detection window constant (ms)
+    Serial.println("pir_triggered true");
     hardware_led_pulse(&pir_led, PIR_DETECTION_WINDOW_MS);
 
     pir_active = true;
     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS;
 
-    // Set PIR source flags (let recompute decide effective state)
+    // Set PIR source flags 
     detection_via_pir = true;
-    recognition_via_pir = true; // or false if PIR should only enable detection
+    recognition_via_pir = true;
 
-    // Recompute global effective flags
+    // recompute state
     recompute_face_state();
 
     Serial.println("PIR detection: face detection + recognition enabled (via PIR)");
@@ -233,7 +210,6 @@ void hardware_poll(void) {
   if (pir_active) {
     int64_t now_ms = esp_timer_get_time() / 1000;
     if (now_ms > pir_active_until_ms) {
-      // deactivate PIR-sourced flags
       pir_active = false;
       detection_via_pir = false;
       recognition_via_pir = false;

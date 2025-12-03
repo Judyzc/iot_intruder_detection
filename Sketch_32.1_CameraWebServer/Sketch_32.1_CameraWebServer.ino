@@ -7,20 +7,29 @@
 // Camera module
 #define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
 #include "camera_pins.h"
+#define TAG "camera: "
 
 //WiFi Credentials
 // const char* ssid     = "DukeVisitor";
 // const char* password = "";
-
 
 void startCameraServer(); // Defined in app_httpd.cpp
 
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
+  delay(200); // give UART a moment
   Serial.setDebugOutput(true);
-  Serial.println();
+
+  // To view ESP logs in Arudino, set core debug level to verbose and uncomment
+  esp_log_level_set("*", ESP_LOG_VERBOSE);
+  esp_log_level_set("app", ESP_LOG_VERBOSE);
+  esp_log_level_set("camera", ESP_LOG_VERBOSE);
+  esp_log_level_set("hardware", ESP_LOG_VERBOSE);
+  Serial.println("esp_log_level_set calls done");
+
+
+  //Camera Pins on ESP32S3
   Serial.println("Setting up camera");
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -48,12 +57,12 @@ void setup() {
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
   config.fb_count = 2;
-  // for PSRAM
+  // for PSRAM (pseudo static ram to add more memory to esp32)
   config.jpeg_quality = 10;
   config.fb_count = 2;
   config.grab_mode = CAMERA_GRAB_LATEST;
 
-  // camera init
+  // camera init 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
@@ -71,6 +80,7 @@ void setup() {
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
 
+  // Allow for Wi-Fi to tIMEOUT
   unsigned long start = millis();
   const unsigned long wifiTimeout = 15000; // 15 s timeout
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < wifiTimeout) {
@@ -95,6 +105,7 @@ void setup() {
     Serial.print("Camera Ready! Use 'http://");
     Serial.print(WiFi.localIP().toString());
     Serial.println("' to connect");
+    // Post that wifi is up
   } else {
     Serial.println("Camera server started but no WiFi IP assigned.");
   }
@@ -103,13 +114,14 @@ void setup() {
   intruder_task_init(); 
 }
 
+// Constantly check to see if PIR has been triggered - "motion detected"
 unsigned long lastPoll = 0;
-const unsigned long pollInterval = 100; // ms
+const unsigned long pollInterval = 500; // ms
 
 void loop() {
   unsigned long now = millis();
   if (now - lastPoll >= pollInterval) {
     lastPoll = now;
-    hardware_poll();
+    hardware_control();
   }
 }
