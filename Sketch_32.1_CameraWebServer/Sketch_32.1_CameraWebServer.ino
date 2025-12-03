@@ -108,6 +108,7 @@ void setup() {
     Serial.print("Camera Ready! Use 'http://");
     Serial.print(WiFi.localIP().toString());
     Serial.println("' to connect");
+
     // Post that wifi is up
   } else {
     Serial.println("Camera server started but no WiFi IP assigned.");
@@ -120,11 +121,17 @@ void setup() {
 // Constantly check to see if PIR has been triggered - "motion detected"
 unsigned long lastPoll = 0;
 const unsigned long pollInterval = 500; // ms
-
+unsigned long lastCallTime = 0;
+const unsigned long interval = 60000;
 void loop() {
   unsigned long now = millis();
   if (now - lastPoll >= pollInterval) {
     lastPoll = now;
     hardware_control();
+  }
+  if (now - lastCallTime >= interval) {
+    if (WiFi.status() == WL_CONNECTED) {
+      send_heartbeat();
+    }
   }
 }

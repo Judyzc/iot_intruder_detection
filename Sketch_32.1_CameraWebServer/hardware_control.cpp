@@ -258,6 +258,15 @@ void send_to_database(bool intruder_status, int face_id, float confidence) {
   int httpCode = http.POST(jsonBody);
 }
 
+void send_heartbeat() {
+  WiFiClient client;    
+  HTTPClient http;
+  const char* serverURL = "http://54.167.124.79:5000/status_create";
+  http.begin(client, serverURL);
+  http.addHeader("Content-Type", "application/json");
+  String jsonBody = String("{") + String("\"status\":") + String("true") + String("}");
+}
+
 // hardware init
 void hardware_init(void) {
   esp_err_t err;
