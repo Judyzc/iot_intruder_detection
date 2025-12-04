@@ -60,6 +60,9 @@ void hardware_buzz(void);
 /* Sends intruder status, face id and confidence to EC2 database */
 void send_to_database(bool intruder_status, int face_id, float confidence);
 
+/* Sends heartbeat that device is active and connected to wifi */
+void send_heartbeat();
+
 /* Sends whatsapp message through chat me bot to notify owner*/
 void sendIntruderAlert(void);
 

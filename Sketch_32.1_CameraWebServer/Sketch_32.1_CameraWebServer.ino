@@ -120,10 +120,22 @@ void setup() {
 unsigned long lastPoll = 0;
 const unsigned long pollInterval = 500; // ms
 
+// update status of esp
+unsigned long lastCallTime = 0;
+const unsigned long interval = 180000;
+
+//unsigned long now = millis();
 void loop() {
   unsigned long now = millis();
   if (now - lastPoll >= pollInterval) {
     lastPoll = now;
     hardware_control();
   }
+
+  if (now - lastCallTime >= interval) {
+  if (WiFi.status() == WL_CONNECTED) {
+    lastCallTime = now;
+    send_heartbeat();
+  }
+}
 }
