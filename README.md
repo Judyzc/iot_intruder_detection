@@ -9,6 +9,7 @@ All Files:
   - Runs facial recognition algorithm
   - Outputs intruder detection status and confidence
   - Intruder detection status is sent to database and hardware peripherals
+  - Sends GET request to CallMeBot to send an intruder status whatsapp message 
   - Sends image buffers to Camera streaming UI
   - Enrolls Face IDs
 - **camera_index.h**
