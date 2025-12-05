@@ -1,5 +1,7 @@
-/* hardware_control.cpp
-   Used to setup and control different hardware peripherals
+/* 
+hardware_control.cpp
+Used to setup and control different hardware peripherals such as buzzer, PIR, LEDs.
+Also sends messages on WhatsApp using Callmebot
 */
 
 #include "esp_timer.h"
@@ -11,6 +13,7 @@
 #include "face_state.h"
 #include <WiFiClientSecure.h>
 #include "hardware_control.h"
+
 #define TAG "hardware: "
 
 // gpio
@@ -35,7 +38,6 @@
 #define PIR_DETECTION_WINDOW_MS 30000u // 30 seconds
 #endif
 
-
 // define led structs
 hw_led_t intruder_led = {
   .pin = INTRUDER_LED_GPIO,
@@ -51,31 +53,32 @@ hw_led_t pir_led = {
   .name = "pir_led"
 };
 
-
+// buzzer timer 
+static esp_timer_handle_t buzz_timer = NULL;
 
 // pir trigger vars
 volatile bool pir_triggered = false;
 volatile bool pir_active = false;
 int64_t pir_active_until_ms = 0;
 
-
 // text message variables
 static volatile unsigned long lastAlertTime = 0;
 #define ALERT_INTERVAL_MS 60000
 
 const char* serverName = "https://api.callmebot.com/whatsapp.php";
-// const char* phoneNumber = "%2B19175103025";
-// const char* phoneNumber = "%2B000000000";
+static WiFiClientSecure alertClient;
+static HTTPClient alertHttp;
+static bool alertClientInitialized = false;
 
-// judy
+// Current set to Judy's phone. 
+// *** To register a new phone and get an API key, text +34 644 33 66 63 'I allow callmebot to send me messages'. 
+// *** Also, put in your phone number
 const char* phoneNumber = "%2B19199282464";
 const char* apiKey = "5923783";
 
-// const char* phoneNumber = "%2B19175103025";
-// const char* apiKey = "2047937";
+// ----- FUNCTIONS --------------------------------
 
-
-// led timer
+/* led timer */
 static void led_timer_callback(void* arg) {
   if (arg == NULL) return;
   hw_led_t *led = (hw_led_t*)arg;
@@ -85,31 +88,26 @@ static void led_timer_callback(void* arg) {
 }
 
 
-// initialize led
+/* initialize led */
 esp_err_t hardware_led_init(hw_led_t *led) {
   if (!led) return ESP_ERR_INVALID_ARG;
-
   pinMode((int)led->pin, OUTPUT);
   digitalWrite((int)led->pin, LOW);
   led->state = false;
-
   esp_timer_create_args_t timerargs = {
     .callback = &led_timer_callback,
     .arg = led,
     .name = led->name
   };
-
   return esp_timer_create(&timerargs, &led->timer);
 }
 
 
-// pulse led
+/* pulse led */
 void hardware_led_pulse(hw_led_t *led, uint32_t ms) {
   if (!led) return;
-
   digitalWrite((int)led->pin, HIGH);
   led->state = true;
-
   if (led->timer) {
     esp_timer_stop(led->timer);
     esp_timer_start_once(led->timer, (int64_t)ms * 1000);
@@ -119,10 +117,9 @@ void hardware_led_pulse(hw_led_t *led, uint32_t ms) {
 }
 
 
-// turn led off
+/* turn led off */
 void hardware_led_off(hw_led_t *led) {
   if (!led) return;
-
   if (led->timer) {
     esp_timer_stop(led->timer);
   }
@@ -131,21 +128,16 @@ void hardware_led_off(hw_led_t *led) {
 }
 
 
-// led state
+/* check led state */
 bool hardware_led_is_on(hw_led_t *led) {
   if (!led) return false;
   return led->state;
 }
 
 
-static WiFiClientSecure alertClient;
-static HTTPClient alertHttp;
-static bool alertClientInitialized = false;
-
-// text message
+/* send text message */
 void sendIntruderAlert() {
   if (lastAlertTime != 0 && (millis() - lastAlertTime) < ALERT_INTERVAL_MS) return;
-
   if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure client;
     client.setInsecure(); // skip certificate check
@@ -157,7 +149,6 @@ void sendIntruderAlert() {
                       "&apikey=" + apiKey;
       http.begin(client, fullURL);
     int httpResponseCode = http.GET();
-
     Serial.print("HTTP Response code: ");
     Serial.println(httpResponseCode);
     if (httpResponseCode > 0) {
@@ -175,32 +166,28 @@ void sendIntruderAlert() {
   // Serial.println("Sending text message (in theory)");
 }
 
-// PIR
+
+/* pir interrupt handler, toggle flag */
 void IRAM_ATTR pir_isr() {
   pir_triggered = true;
 }
 
-// looping to check if pir changed variables - called in main .ino file
+
+/* looping to check if pir changed variables - called in main .ino file */
 void hardware_control(void) {
   if (pir_triggered) {
     pir_triggered = false;
-
     Serial.println("pir_triggered true");
     hardware_led_pulse(&pir_led, PIR_DETECTION_WINDOW_MS);
-
     pir_active = true;
     pir_active_until_ms = (esp_timer_get_time() / 1000) + PIR_DETECTION_WINDOW_MS;
-
     // Set PIR source flags 
     detection_via_pir = true;
     recognition_via_pir = true;
-
     // recompute state
     recompute_face_state();
-
     Serial.println("PIR detection: face detection + recognition enabled (via PIR)");
   }
-
   if (pir_active) {
     int64_t now_ms = esp_timer_get_time() / 1000;
     if (now_ms > pir_active_until_ms) {
@@ -208,21 +195,20 @@ void hardware_control(void) {
       detection_via_pir = false;
       recognition_via_pir = false;
       pir_active_until_ms = 0;
-
       recompute_face_state();
-
       Serial.println("PIR detection expired: PIR-sourced detection + recognition disabled");
     }
   }
-
 }
 
+
+/* buzzer time callback */
 static void buzz_timer_cb(void* arg) {
   digitalWrite((int)BUZZ_GPIO, LOW);
 }
 
-static esp_timer_handle_t buzz_timer = NULL;
 
+/* initialize buzzer gpio */
 void hardware_buzz_init() {
   if (!buzz_timer) {
     esp_timer_create_args_t timerargs = {
@@ -234,6 +220,8 @@ void hardware_buzz_init() {
   }
 }
 
+
+/* start timer for buzzer */
 void hardware_buzz(void) {
   digitalWrite((int)BUZZ_GPIO, HIGH);
   if (buzz_timer) {
@@ -241,6 +229,8 @@ void hardware_buzz(void) {
   }
 }
 
+
+/* log data (face recognizer metrics) to database */
 void send_to_database(bool intruder_status, int face_id, float confidence) {
   WiFiClient client;    
   HTTPClient http;
@@ -251,6 +241,8 @@ void send_to_database(bool intruder_status, int face_id, float confidence) {
   int httpCode = http.POST(jsonBody);
 }
 
+
+/* send status of ESP32-S3 */
 void send_heartbeat() {
   WiFiClient client;    
   HTTPClient http;
@@ -262,7 +254,7 @@ void send_heartbeat() {
 }
 
 
-// hardware init
+/* set up gpio for pir and buzzer */
 void hardware_init(void) {
   esp_err_t err;
   err = hardware_led_init(&intruder_led);

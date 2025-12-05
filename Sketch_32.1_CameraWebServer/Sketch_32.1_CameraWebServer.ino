@@ -1,12 +1,15 @@
+/* 
+entry point for the ESP32-S3. 
+in setup(), sets up WiFi, hardware peripherals, ESP32-S3 web server.
+in loop(), handle PIR interrupts and corresponding FD/FR actions.
+*/
+
 #include "esp_camera.h"
 #include <WiFi.h>
 #include "hardware_control.h"
 #include "intruder_task.h"
-
-
-
 // Camera module
-#define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
+#define CAMERA_MODEL_ESP32S3_EYE
 #include "camera_pins.h"
 #define TAG "camera: "
 
@@ -14,24 +17,24 @@
 const char* ssid     = "DukeVisitor";
 const char* password = "";
 
+// Forward definition of function, defined in app_httpd.cpp
+void startCameraServer(); 
 
-void startCameraServer(); // Defined in app_httpd.cpp
+// variables for PIR 
+unsigned long lastPoll = 0;
+const unsigned long pollInterval = 500; // ms
+
+// variables for tracking ESP32-s3 status
+unsigned long lastCallTime = 0;
+const unsigned long interval = 180000;
 
 
 void setup() {
   Serial.begin(115200);
-  delay(200); // give UART a moment
+  delay(200);
   Serial.setDebugOutput(true);
 
-  // To view ESP logs in Arudino, set core debug level to verbose and uncomment
-  // esp_log_level_set("*", ESP_LOG_VERBOSE);
-  // esp_log_level_set("app", ESP_LOG_VERBOSE);
-  // esp_log_level_set("camera", ESP_LOG_VERBOSE);
-  // esp_log_level_set("hardware", ESP_LOG_VERBOSE);
-  // Serial.println("esp_log_level_set calls done");
-
-
-  //Camera Pins on ESP32S3
+  // Camera Pins on ESP32S3
   Serial.println("Setting up camera");
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -54,7 +57,7 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
   config.frame_size = FRAMESIZE_QVGA;
-  config.pixel_format = PIXFORMAT_JPEG; // for streaming
+  config.pixel_format = PIXFORMAT_JPEG;  // for streaming
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
@@ -70,12 +73,10 @@ void setup() {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
-
-  sensor_t * s = esp_camera_sensor_get();
-  // initial sensors are flipped vertically and colors are a bit saturated
-  s->set_vflip(s, 0); // flip it back
-  s->set_brightness(s, 1); // up the brightness just a bit
-  s->set_saturation(s, 0); // lower the saturation
+  sensor_t * s = esp_camera_sensor_get();  // initial sensors are flipped vertically and colors are a bit saturated
+  s->set_vflip(s, 0);                      // flip it back
+  s->set_brightness(s, 1);                 // up the brightness just a bit
+  s->set_saturation(s, 0);                 // lower the saturation
 
   // Start Wi-Fi
   WiFi.mode(WIFI_STA);
@@ -90,7 +91,6 @@ void setup() {
     Serial.print('.');
   }
   Serial.println();
-
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi connection failed or timed out!");
   } else {
@@ -99,6 +99,7 @@ void setup() {
     Serial.println(WiFi.localIP().toString()); 
   }
 
+  // start ESP32-S3 camera web server
   startCameraServer();
 
   // give server a moment to start up and then print the camera URL
@@ -112,30 +113,22 @@ void setup() {
     Serial.println("Camera server started but no WiFi IP assigned.");
   }
 
+  // initialize hardware and the intruder FreeRTOS task
   hardware_init();
   intruder_task_init(); 
 }
 
-// Constantly check to see if PIR has been triggered - "motion detected"
-unsigned long lastPoll = 0;
-const unsigned long pollInterval = 500; // ms
 
-// update status of esp
-unsigned long lastCallTime = 0;
-const unsigned long interval = 180000;
-
-//unsigned long now = millis();
 void loop() {
   unsigned long now = millis();
   if (now - lastPoll >= pollInterval) {
     lastPoll = now;
     hardware_control();
   }
-
   if (now - lastCallTime >= interval) {
-  if (WiFi.status() == WL_CONNECTED) {
-    lastCallTime = now;
-    send_heartbeat();
+    if (WiFi.status() == WL_CONNECTED) {
+      lastCallTime = now;
+      send_heartbeat();
+    }
   }
-}
 }

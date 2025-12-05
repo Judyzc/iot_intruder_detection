@@ -18,7 +18,6 @@
 #define PIR_GPIO GPIO_NUM_47
 #endif
 
-
 // LED struct
 typedef struct {
     gpio_num_t pin;
@@ -27,7 +26,7 @@ typedef struct {
     const char *name;
 } hw_led_t;
 
-
+// PIR and intruder variables 
 extern hw_led_t intruder_led; 
 extern hw_led_t pir_led;      
 extern volatile bool pir_triggered;       

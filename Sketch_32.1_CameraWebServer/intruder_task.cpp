@@ -1,9 +1,14 @@
-// intruder_task.cpp
+/*
+intruder_task.cpp
+simple FreeRTOS queue for managing intruder detection without blocking the CPU: 
+sound the buzzer, pulse the red led, and send an alert on WhatsApp
+*/ 
 #include "intruder_task.h"
 #include "hardware_control.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+
 
 static QueueHandle_t intruderQueue = NULL;
 

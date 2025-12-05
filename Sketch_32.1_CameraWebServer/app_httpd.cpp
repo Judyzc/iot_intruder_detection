@@ -1,3 +1,7 @@
+/* 
+Web app for ESP32-S3 showing camera stream.
+*/
+
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -20,6 +24,7 @@
 #include <vector>
 #include <list>
 #include <cstdarg> 
+
 // First Stage Detector - Multi State Regression 1 - Run lightweight model to find potential face candidate regions
 // Outputs a bounding box
 // (score_threshold, nms_threshold, top_k, center_variance)
@@ -27,17 +32,16 @@
 // Second Stage Detector - Multi Network Pipeline - Takes bounding boxes and improves location and add facial landmarks
 // Needed for proper landmark alignment -- two stage recognition
 #include "human_face_detect_mnp01.hpp"
-/* we need TWO_STAGE === 1 for facial recognition */
-#define TWO_STAGE 1 /*<! 1: detect by two-stage which is more accurate but slower(with keypoints). */
-                    /*<! 0: detect by one-stage which is less accurate but faster(without keypoints). */
+
+#define TWO_STAGE 1                         // 1: detect by two-stage, uses keypoints, needed for facial recognition
 #include "face_recognition_tool.hpp"
 // Espressif face recognition models
-// 16-bit vs 8 bit signed weights/activations
-#include "face_recognition_112_v1_s16.hpp"
-#include "face_recognition_112_v1_s8.hpp" // less accurate but runs faster - what we're using!
+#include "face_recognition_112_v1_s8.hpp"   // less accurate but runs faster - what we're using!
 
 // Max number of enrolled faces
 #define FACE_ID_SAVE_NUMBER 7
+
+// stream resolution variables
 #define FACE_COLOR_WHITE 0x00FFFFFF
 #define FACE_COLOR_BLACK 0x00000000
 #define FACE_COLOR_RED 0x000000FF
@@ -46,7 +50,7 @@
 #define FACE_COLOR_YELLOW (FACE_COLOR_RED | FACE_COLOR_GREEN)
 #define FACE_COLOR_CYAN (FACE_COLOR_BLUE | FACE_COLOR_GREEN)
 #define FACE_COLOR_PURPLE (FACE_COLOR_BLUE | FACE_COLOR_RED)
-#define ENROLL_INTERVAL_MS 5000  // 5 seconds between enroll captures (tune if you like)
+#define ENROLL_INTERVAL_MS 5000          // 5 seconds between enroll captures (tune if you like)
 
 // Enables live streaming over HTTP by mix of JPEG to MJPEG though mixed
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -68,6 +72,12 @@ volatile int8_t is_enrolling = 0;
 volatile int8_t detection_enabled = 0;
 volatile int8_t recognition_enabled = 0;
 
+// Delay showing the enrollment messages on screen
+static bool show_enroll_msg = false;
+static char enroll_msg_text[64];
+static int64_t enroll_msg_until_us = 0;
+#define ENROLL_MSG_DURATION_MS 3000
+
 /* 
     face recognition model (neural network) 
     extracts face embeddings and compares to IDs
@@ -77,19 +87,16 @@ volatile int8_t recognition_enabled = 0;
 */
 FaceRecognition112V1S8 recognizer;
 
-// Logic for delaying showing the enrollment messages on screen
-static bool show_enroll_msg = false;
-static char enroll_msg_text[64];
-static int64_t enroll_msg_until_us = 0;
-#define ENROLL_MSG_DURATION_MS 3000   // show for 3 seconds
--+
-/*Prints out text at top of frame buffer (intruder, id, confidence, etc)*/
+// ----- FUNCTIONS --------------------------------
+
+/* Prints out text at top of frame buffer (intruder, id, confidence, etc)*/
 static void rgb_print(fb_data_t *fb, uint32_t color, const char *str)
 {
     fb_gfx_print(fb, (fb->width - (strlen(str) * 14)) / 2, 10, color, str);
 }
 
-// Prints out ID and confidence values onto screen
+
+/* Prints out ID and confidence values onto screen */
 static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
 {
     char loc_buf[64];
@@ -97,18 +104,14 @@ static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
     int len;
     va_list arg;
     va_list copy;
-
     va_start(arg, format);
-
     va_copy(copy, arg);
     len = vsnprintf(NULL, 0, format, copy);
     va_end(copy);
-
     if (len < 0) {
         va_end(arg);
         return 0;
     }
-
     if (len >= (int)sizeof(loc_buf)) {
         temp = (char *)malloc(len + 1);
         if (temp == NULL) {
@@ -116,16 +119,12 @@ static int rgb_printf(fb_data_t *fb, uint32_t color, const char *format, ...)
             return 0;
         }
     }
-
     vsnprintf(temp, (size_t)len + 1, format, arg);
     va_end(arg);
-
     rgb_print(fb, color, temp);
-
     if (temp != loc_buf) {
         free(temp);
     }
-
     return len;
 }
 
@@ -164,7 +163,6 @@ static void draw_face_boxes(fb_data_t *fb, std::list<dl::detect::result_t> *resu
         fb_gfx_drawFastHLine(fb, x, y + h - 1, w, color);
         fb_gfx_drawFastVLine(fb, x, y, h, color);
         fb_gfx_drawFastVLine(fb, x + w - 1, y, h, color);
-#if TWO_STAGE
         // landmarks (left eye, mouth left, nose, right eye, mouth right)
         int x0, y0, j;
         for (j = 0; j < 10; j+=2) {
@@ -172,9 +170,9 @@ static void draw_face_boxes(fb_data_t *fb, std::list<dl::detect::result_t> *resu
             y0 = (int)prediction->keypoint[j+1];
             fb_gfx_fillRect(fb, x0, y0, 3, 3, color);
         }
-#endif
     }
 }
+
 
 /*
     Runs facial recognition
@@ -184,60 +182,53 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
 {
     std::vector<int> landmarks = results->front().keypoint;
     int id = -1;
-
     // Turns framebuffer into a Tensor object to put into the NN
     Tensor<uint8_t> tensor;
     tensor.set_element((uint8_t *)fb->data).set_shape({fb->height, fb->width, 3}).set_auto_free(false);
-
-
     // If enrolling, a face, check how many faces can be enrolled
     int enrolled_count = recognizer.get_enrolled_id_num();
     bool did_enroll = false;
-
     if (enrolled_count < FACE_ID_SAVE_NUMBER && is_enrolling) {
         // timestamp of last enroll, 5 second intervals for enrolling
         static int64_t last_enroll_time_us = 0;
         int64_t now_us = esp_timer_get_time();
-
         if (now_us - last_enroll_time_us >= (int64_t)ENROLL_INTERVAL_MS * 1000) {
             id = recognizer.enroll_id(tensor, landmarks, "", true);
             last_enroll_time_us = now_us;
             did_enroll = true;
             ESP_LOGI(TAG, "Enrolled ID: %d", id);
-
             // delay a little to slow down enrolling and verify that identity has been enrolled
             sprintf(enroll_msg_text, "ID[%u] enrolled", id);
             show_enroll_msg = true;
             enroll_msg_until_us = esp_timer_get_time() + (int64_t)ENROLL_MSG_DURATION_MS * 1000;
-
             rgb_printf(fb, FACE_COLOR_CYAN, enroll_msg_text);
-
             return id;
-
         }
     }
 
     face_info_t recognize = recognizer.recognize(tensor, landmarks);
-    if(!is_enrolling){
-    if (recognize.id >= 0) {
-        // recognized owner — print single green line
-        rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
-        send_to_database(false, recognize.id, recognize.similarity);
-    } else {
-        // intruder — single red message
-        rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
-        intruder_queue_send(1);
-        Serial.println("INTRUDER");
-        send_to_database(true, -1, recognize.similarity);
-    }
+    if(!is_enrolling) {
+        if (recognize.id >= 0) {
+            // recognized owner — print single green line
+            rgb_printf(fb, FACE_COLOR_GREEN, "ID[%u]: %.2f", recognize.id, recognize.similarity);
+            // log data
+            send_to_database(false, recognize.id, recognize.similarity);
+        } else {
+            // intruder — single red message
+            rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
+            intruder_queue_send(1);
+            // Serial.println("INTRUDER");
+            // log data
+            send_to_database(true, -1, recognize.similarity);
+        }
     }
     return recognize.id;
-
 }
 
-// Used to check either flag and determine if recognition or detection has been triggered by gui or pir
+
+/* Used to check either flag and determine if recognition or detection has been triggered by gui or pir */
 void recompute_face_state() {
-    // // recognition depends on detection
+    // recognition depends on detection
     // If no face has been enrolled yet, ignore PIR-sourced requests to enable detection/recognition.
     int enrolled_count = recognizer.get_enrolled_id_num();
     if (enrolled_count == 0) {
@@ -248,22 +239,18 @@ void recompute_face_state() {
         detection_via_pir = false;
         recognition_via_pir = false;
     }
-
     // recognition depends on detection
     recognition_enabled = (recognition_via_gui || recognition_via_pir) ? 1 : 0;
     detection_enabled = (detection_via_gui || detection_via_pir || is_enrolling) ? 1 : 0;
-
     if (recognition_enabled) detection_enabled = 1;
     Serial.println("recomputing");
-
     ESP_LOGI("face_state", "recompute: d_gui=%d d_pir=%d enroll=%d => detect=%d | r_gui=%d r_pir=%d => recog=%d",
              detection_via_gui, detection_via_pir, is_enrolling,
              detection_enabled, recognition_via_gui, recognition_via_pir, recognition_enabled);
 }
 
-// THE GOOD STUFF
-// Live MJPEG Face Detection and Recognition
 
+/* Live MJPEG Face Detection and Recognition */
 static esp_err_t stream_handler(httpd_req_t *req)
 {
     camera_fb_t *fb = NULL;
@@ -282,14 +269,10 @@ static esp_err_t stream_handler(httpd_req_t *req)
     size_t out_len = 0, out_width = 0, out_height = 0;
     uint8_t *out_buf = NULL;
     bool s = false;
-#if TWO_STAGE
     // MSR01 params: (score/confidence threshold; nms threshold (IoU); top_K (candidates to return); post filter threshold)
     HumanFaceDetectMSR01 s1(0.2F, 0.1F, 10, 0.2F);
     // MNP01 params: (score/confidence threshold; nms threshold (IoU); top_K (candidates to return))
     HumanFaceDetectMNP01 s2(0.2F, 0.1F, 5);
-#else
-    HumanFaceDetectMSR01 s1(0.3F, 0.5F, 10, 0.2F);
-#endif
     static int64_t last_frame = 0;
     if (!last_frame)
     {
@@ -302,7 +285,6 @@ static esp_err_t stream_handler(httpd_req_t *req)
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "X-Framerate", "60");
-
     // loop to contiuously send frames until disconnect
     while (true)
     {
@@ -348,13 +330,9 @@ static esp_err_t stream_handler(httpd_req_t *req)
                 if (fb->format == PIXFORMAT_RGB565 && !recognition_enabled && !is_enrolling)
                 {
                     fr_ready = esp_timer_get_time();
-#if TWO_STAGE
                     // running detection on the output buffer
                     std::list<dl::detect::result_t> &candidates = s1.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3});
                     std::list<dl::detect::result_t> &results = s2.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3}, candidates);
-#else
-                    std::list<dl::detect::result_t> &results = s1.infer((uint16_t *)fb->buf, {(int)fb->height, (int)fb->width, 3});
-#endif
                     fr_face = esp_timer_get_time();
                     fr_recognize = fr_face;
                     if (results.size() > 0) {
@@ -400,12 +378,8 @@ static esp_err_t stream_handler(httpd_req_t *req)
                             rfb.data = out_buf;
                             rfb.bytes_per_pixel = 3;
                             rfb.format = FB_BGR888;
-#if TWO_STAGE
                             std::list<dl::detect::result_t> &candidates = s1.infer((uint8_t *)out_buf, {(int)out_height, (int)out_width, 3});
                             std::list<dl::detect::result_t> &results = s2.infer((uint8_t *)out_buf, {(int)out_height, (int)out_width, 3}, candidates);
-#else
-                            std::list<dl::detect::result_t> &results = s1.infer((uint8_t *)out_buf, {(int)out_height, (int)out_width, 3});
-#endif
                             fr_face = esp_timer_get_time();
                             fr_recognize = fr_face;
                             if (results.size() > 0) {
@@ -483,7 +457,8 @@ static esp_err_t stream_handler(httpd_req_t *req)
     return res;
 }
 
-// helper for parsing query
+
+/* helper for parsing query */
 static esp_err_t parse_get(httpd_req_t *req, char **obuf)
 {
     char *buf = NULL;
@@ -505,34 +480,29 @@ static esp_err_t parse_get(httpd_req_t *req, char **obuf)
     return ESP_FAIL;
 }
 
-// handles UI controls 
+
+/* handles UI controls */
 static esp_err_t cmd_handler(httpd_req_t *req)
 {
     char *buf = NULL;
     char variable[32];
     char value[32];
-
-
     if (parse_get(req, &buf) != ESP_OK) {
         return ESP_FAIL;
     }
-
     if (httpd_query_key_value(buf, "var", variable, sizeof(variable)) != ESP_OK) {
         free(buf);
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
-
     if (httpd_query_key_value(buf, "val", value, sizeof(value)) != ESP_OK) {
         value[0] = '\0';
     }
     free(buf);
-
     int val = atoi(value);
     ESP_LOGI(TAG, "%s = %d", variable, val);
     sensor_t *s = esp_camera_sensor_get();
     int res = 0;
-
     if (!strcmp(variable, "quality"))
         res = s->set_quality(s, val);
     else if (!strcmp(variable, "contrast"))
@@ -568,16 +538,15 @@ static esp_err_t cmd_handler(httpd_req_t *req)
         ESP_LOGI(TAG, "Unknown command: %s", variable);
         res = -1;
     }
-
     if (res < 0) {
         return httpd_resp_send_500(req);
     }
-
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     return httpd_resp_send(req, NULL, 0);
 }
 
-// sends compressed HTTP - UI fully hosted on esp32 - address = ESP IP
+
+/* sends compressed HTTP - UI fully hosted on esp32 - address = ESP IP  */
 static esp_err_t index_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
@@ -593,33 +562,30 @@ static esp_err_t index_handler(httpd_req_t *req)
     }
 }
 
-// main setup for app and its endpoints
+
+/* main setup for app and its endpoints  */
 void startCameraServer()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 16;
-
     httpd_uri_t index_uri = {
         .uri = "/",
         .method = HTTP_GET,
         .handler = index_handler,
         .user_ctx = NULL
     };
-
     httpd_uri_t cmd_uri = {
         .uri = "/control",
         .method = HTTP_GET,
         .handler = cmd_handler,
         .user_ctx = NULL
     };
-
     httpd_uri_t stream_uri = {
         .uri = "/stream",
         .method = HTTP_GET,
         .handler = stream_handler,
         .user_ctx = NULL
     };
-
     // face recognizer
     recognizer.set_partition(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "fr");
     recognizer.set_ids_from_flash();     // load ids from flash partition
@@ -629,7 +595,6 @@ void startCameraServer()
         httpd_register_uri_handler(camera_httpd, &index_uri);
         httpd_register_uri_handler(camera_httpd, &cmd_uri);
     }
-
     config.server_port += 1;
     config.ctrl_port += 1;
     ESP_LOGI(TAG, "Starting stream server on port: '%d'", config.server_port);
@@ -638,5 +603,6 @@ void startCameraServer()
         httpd_register_uri_handler(stream_httpd, &stream_uri);
     }
 }
+
 
 
