@@ -82,7 +82,7 @@ static bool show_enroll_msg = false;
 static char enroll_msg_text[64];
 static int64_t enroll_msg_until_us = 0;
 #define ENROLL_MSG_DURATION_MS 3000   // show for 3 seconds
-
+-+
 /*Prints out text at top of frame buffer (intruder, id, confidence, etc)*/
 static void rgb_print(fb_data_t *fb, uint32_t color, const char *str)
 {
@@ -228,7 +228,7 @@ static int run_face_recognition(fb_data_t *fb, std::list<dl::detect::result_t> *
         rgb_print(fb, FACE_COLOR_RED, "Intruder Alert!");
         intruder_queue_send(1);
         Serial.println("INTRUDER");
-        send_to_database(true, -1, 200.0);
+        send_to_database(true, -1, recognize.similarity);
     }
     }
     return recognize.id;
@@ -283,10 +283,10 @@ static esp_err_t stream_handler(httpd_req_t *req)
     uint8_t *out_buf = NULL;
     bool s = false;
 #if TWO_STAGE
-    // Can alter this to make more sensitive
-    // (score thresholds, NMS, top_K, variance)
-    HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);
-    HumanFaceDetectMNP01 s2(0.5F, 0.3F, 5);
+    // MSR01 params: (score/confidence threshold; nms threshold (IoU); top_K (candidates to return); post filter threshold)
+    HumanFaceDetectMSR01 s1(0.2F, 0.1F, 10, 0.2F);
+    // MNP01 params: (score/confidence threshold; nms threshold (IoU); top_K (candidates to return))
+    HumanFaceDetectMNP01 s2(0.2F, 0.1F, 5);
 #else
     HumanFaceDetectMSR01 s1(0.3F, 0.5F, 10, 0.2F);
 #endif
